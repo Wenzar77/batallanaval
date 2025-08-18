@@ -67,9 +67,7 @@ export default function App() {
 
   useEffect(() => {
     const env = import.meta.env.VITE_WS_URL?.trim();
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    // Si hay VITE_WS_URL, úsala tal cual (completa). Si no, usa mismo host con /ws.
-    const wsUrl = env || `${proto}://${location.host}/ws`;
+    const wsUrl = `${env}/ws`;
 
     console.log('WS URL ->', wsUrl); // debug
     const socket = new WebSocket(wsUrl);
