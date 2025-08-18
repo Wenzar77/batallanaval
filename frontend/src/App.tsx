@@ -67,7 +67,8 @@ export default function App() {
 
   useEffect(() => {
     const env = import.meta.env.VITE_WS_URL?.trim();
-    const wsUrl = `${env}/ws`;
+    //const wsUrl = `${env}/ws`;
+    const wsUrl='https://batallanaval-ws.vercel.app/ws'; // Ajuste de URL del servidor
 
     console.log('WS URL ->', wsUrl); // debug
     const socket = new WebSocket(wsUrl);
