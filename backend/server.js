@@ -263,9 +263,13 @@ wss.on('connection', (ws) => {
   });
 });
 
+app.get('/health', (_req,res)=>res.status(200).send('ok'));
+
 // 3) Fallback SPA: usa REGEX que excluye /ws y evita '*'
 app.get(/^\/(?!ws).*$/, (_req, res) => {
   res.sendFile(join(distPath, 'index.html'));
 });
 
 server.listen(PORT, () => console.log(`Servidor en puerto ${PORT}`));
+
+
