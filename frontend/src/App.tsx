@@ -65,10 +65,15 @@ export default function App() {
   const [weaponToUse, setWeaponToUse] = useState<string | null>(null)
   const [doubleShotPending, setDoubleShotPending] = useState<number>(0)
 
-  // Conexión WS (mismo host + ruta /ws, usa ws o wss según protocolo de la página)
   useEffect(() => {
-    const base = import.meta.env.VITE_WS_URL || `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
-    const socket = new WebSocket(`${base}/ws`);
+    const env = import.meta.env.VITE_WS_URL?.trim();
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    // Si hay VITE_WS_URL, úsala tal cual (completa). Si no, usa mismo host con /ws.
+    const wsUrl = env || `${proto}://${location.host}/ws`;
+
+    console.log('WS URL ->', wsUrl); // debug
+    const socket = new WebSocket(wsUrl);
+
     socket.onopen = () => setConnected(true);
     socket.onclose = () => setConnected(false);
     socket.onmessage = (ev) => {
@@ -78,6 +83,7 @@ export default function App() {
       if (data.type === 'toast') setToast(data.message);
       if (data.type === 'trivia') setTrivia(data);
     };
+
     setWs(socket);
     return () => socket.close();
   }, []);
