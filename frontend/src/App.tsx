@@ -66,10 +66,7 @@ export default function App() {
   const [doubleShotPending, setDoubleShotPending] = useState<number>(0)
 
   useEffect(() => {
-    const env = import.meta.env.VITE_WS_URL?.trim();
-    //const wsUrl = `${env}/ws`;
-    const wsUrl='https://batallanaval-ws.vercel.app/ws'; // Ajuste de URL del servidor
-
+    const wsUrl = 'wss://batallanaval-ws.vercel.app/ws';
     console.log('WS URL ->', wsUrl); // debug
     const socket = new WebSocket(wsUrl);
 
