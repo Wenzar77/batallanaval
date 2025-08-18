@@ -66,10 +66,16 @@ export default function App() {
   const [doubleShotPending, setDoubleShotPending] = useState<number>(0)
 
   useEffect(() => {
-    const wsUrl = 'https://batallanaval-ws.vercel.app/ws';
-    console.log('WS URL ->', wsUrl); // debug
-    const socket = new WebSocket(wsUrl);
+    // toma la URL de entorno en prod; usa local en dev
+    const base = (import.meta.env.PROD
+      ? (import.meta.env.VITE_WS_URL || '').trim()
+      : 'ws://localhost:3000/ws');
 
+    // sanitiza doble slash al final
+    const wsUrl = base.replace(/\/+$/, '');
+    console.log('WS URL ->', wsUrl);
+
+    const socket = new WebSocket(wsUrl);
     socket.onopen = () => setConnected(true);
     socket.onclose = () => setConnected(false);
     socket.onmessage = (ev) => {
