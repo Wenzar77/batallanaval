@@ -268,6 +268,4 @@ app.get(/^\/(?!ws).*$/, (_req, res) => {
   res.sendFile(join(distPath, 'index.html'));
 });
 
-server.listen(PORT, () => {
-  console.log(`✅ Server listo en http://localhost:${PORT}  (WS en /ws)`);
-});
+server.listen(PORT, () => console.log(`Servidor en puerto ${PORT}`));

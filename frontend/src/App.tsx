@@ -65,22 +65,22 @@ export default function App() {
   const [weaponToUse, setWeaponToUse] = useState<string | null>(null)
   const [doubleShotPending, setDoubleShotPending] = useState<number>(0)
 
- // Conexión WS (mismo host + ruta /ws, usa ws o wss según protocolo de la página)
-useEffect(() => {
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  const socket = new WebSocket(`${proto}://${location.host}/ws`);
-  socket.onopen = () => setConnected(true);
-  socket.onclose = () => setConnected(false);
-  socket.onmessage = (ev) => {
-    const data = JSON.parse(ev.data);
-    if (data.type === 'roomCreated') setCode(data.code);
-    if (data.type === 'roomUpdate') setSnapshot(data.snapshot);
-    if (data.type === 'toast') setToast(data.message);
-    if (data.type === 'trivia') setTrivia(data);
-  };
-  setWs(socket);
-  return () => socket.close();
-}, []);
+  // Conexión WS (mismo host + ruta /ws, usa ws o wss según protocolo de la página)
+  useEffect(() => {
+    const base = import.meta.env.VITE_WS_URL || `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
+    const socket = new WebSocket(`${base}/ws`);
+    socket.onopen = () => setConnected(true);
+    socket.onclose = () => setConnected(false);
+    socket.onmessage = (ev) => {
+      const data = JSON.parse(ev.data);
+      if (data.type === 'roomCreated') setCode(data.code);
+      if (data.type === 'roomUpdate') setSnapshot(data.snapshot);
+      if (data.type === 'toast') setToast(data.message);
+      if (data.type === 'trivia') setTrivia(data);
+    };
+    setWs(socket);
+    return () => socket.close();
+  }, []);
 
 
   const hitsEnemy = useMemo(() => {
