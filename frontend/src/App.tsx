@@ -66,7 +66,7 @@ export default function App() {
   const [doubleShotPending, setDoubleShotPending] = useState<number>(0)
 
   useEffect(() => {
-    const wsUrl = 'wss://batallanaval-ws.vercel.app/ws';
+    const wsUrl = 'https://batallanaval-ws.vercel.app/ws';
     console.log('WS URL ->', wsUrl); // debug
     const socket = new WebSocket(wsUrl);
 
