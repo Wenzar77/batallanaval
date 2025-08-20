@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import crypto from 'crypto';
 
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 3000;
 const SIZE = 20;
 const SHIPS = [5, 4, 3, 3, 2, 2, 2];
 const TRIVIA_PROB = 0.35;
