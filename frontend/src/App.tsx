@@ -50,9 +50,9 @@ const TEAM_ICONS: Record<Team, string> = { A: '🐆', B: '🦜' };
 type TriviaMsg = {
   card: { q: string; opts: string[] };
   nonce: string;
-  canAnswer: boolean;        // 👈 NEW
-  playerName: string;        // 👈 NEW (quien puede responder)
-  team: Team;                // 👈 NEW (equipo en turno cuando salió la trivia)
+  canAnswer: boolean;
+  playerName?: string;  // opcional
+  team?: Team;          // opcional
 };
 
 
@@ -126,6 +126,17 @@ export default function App() {
     : undefined;
   const turnPlayerName = turnPlayer?.name ?? null;
 
+  // nombre del jugador en turno según snapshot (por si trivia no trae playerName)
+  const turnPlayerNameFromSnapshot =
+    snapshot?.turnPlayerId
+      ? snapshot.players.find(p => p.id === snapshot.turnPlayerId)?.name ?? null
+      : null;
+
+  // fallbacks robustos
+  const safePlayerName = trivia?.playerName ?? turnPlayerNameFromSnapshot ?? 'el jugador en turno';
+  const safeTeamKey = (trivia?.team ?? snapshot?.turnTeam ?? 'A') as Team;
+  const names = snapshot?.teamNames ?? DEFAULT_TEAM_NAMES;
+  const safeTeamName = names[safeTeamKey] ?? safeTeamKey;
 
   // ---- Conexión WS ----
   useEffect(() => {
@@ -140,7 +151,7 @@ export default function App() {
       if (data.type === 'roomCreated') setCode(data.code);
       if (data.type === 'roomUpdate') setSnapshot(data.snapshot);
       if (data.type === 'toast') setToast(data.message);
-      if (data.type === 'trivia') setTrivia(data);
+      if (data.type === 'trivia') { console.log('[TRIVIA RX]', data); setTrivia(data); }
     };
 
     setWs(socket);
@@ -492,9 +503,13 @@ export default function App() {
 
 
       <Snackbar open={!!toast} autoHideDuration={3000} onClose={() => setToast(null)}>
-        <Alert severity="success" onClose={() => setToast(null)}>
-          {toast}
+        {/* Indica claramente quién debe responder */}
+        <Alert severity={trivia.canAnswer ? 'success' : 'warning'} sx={{ mb: 2 }}>
+          {trivia.canAnswer
+            ? '¡Te toca responder!'
+            : <>Responde <b>{safePlayerName}</b> — <b>{safeTeamName}</b></>}
         </Alert>
+
       </Snackbar>
     </>
   );
