@@ -13,15 +13,12 @@ const SHIPS = [5, 4, 3, 3, 2, 2, 2];
 const TRIVIA_PROB = 0.35;
 const TRIVIA_TIME = 15_000;
 const WEAPONS = ['doubleShot', 'bomb3x3', 'crossMissile', 'radar'];
-
-// Equipos 🇨🇴
 const TEAM_NAMES = { A: 'Jaguares', B: 'Guacamayas' };
 
-
 // Puntaje
-const PTS_HIT = 10;     // acierto a celda con barco
-const PTS_SINK = 30;    // hundir barco
-const PTS_TRIVIA = 15;  // trivia correcta
+const PTS_HIT = 10;
+const PTS_SINK = 30;
+const PTS_TRIVIA = 15;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -30,13 +27,14 @@ const app = express();
 const server = createServer(app);
 const distPath = join(__dirname, 'dist');
 
-// 1) Estáticos (si sirves build en el mismo server)
 app.use(express.static(distPath));
 
-// 2) WebSocket en /ws
 const wss = new WebSocketServer({ server, path: '/ws' });
 
 // ===== utilidades =====
+const uuid = () => crypto.randomUUID();
+const randomChoice = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
 function emptyBoard() {
   return Array.from({ length: SIZE }, () => Array(SIZE).fill(0));
 }
@@ -81,8 +79,8 @@ function coordsInCross(x, y) {
   return c;
 }
 function countShipsRemaining(board, enemyHitsSet) {
-  if (!board) return 0; // lobby safe
-  const shipCells = new Map(); // shipId -> count
+  if (!board) return 0;
+  const shipCells = new Map();
   for (let i = 0; i < SIZE; i++) {
     for (let j = 0; j < SIZE; j++) {
       const v = board[i][j];
@@ -99,7 +97,6 @@ function countShipsRemaining(board, enemyHitsSet) {
   return remaining;
 }
 function isShipSunk(board, shipId, enemyHitsSet) {
-  // retorna true si todas las celdas shipId están golpeadas por el atacante
   for (let i = 0; i < SIZE; i++) {
     for (let j = 0; j < SIZE; j++) {
       if (board[i][j] === shipId) {
@@ -111,27 +108,32 @@ function isShipSunk(board, shipId, enemyHitsSet) {
   return true;
 }
 
-const randomChoice = (arr) => arr[Math.floor(Math.random() * arr.length)];
-const uuid = () => crypto.randomUUID();
-
-// ===== estado de salas =====
+// ===== estado =====
 /*
 room = {
-  code, state, players(Map), clients(Set), boards, hits, misses, weapons, turnTeam,
-  triviaPending, teamNames, scores: { teams:{A,B}, players: Map<playerId, points> }
+  code, state, players(Map), clients(Set), boards, hits, misses, weapons,
+  turnTeam, turnPlayerId, triviaPending,
+  scores: { teams:{A,B}, players: Map<playerId, points> },
+  sunk: { A: Set<shipId>, B: Set<shipId> }
 }
 */
 const rooms = new Map();
 
 function makeSnapshot(room) {
   const hasBoards = !!(room.boards?.A && room.boards?.B);
+  const playerScoresArray = Array.from(room.players.values()).map(p => ({
+    id: p.id,
+    name: p.name,
+    team: p.team,
+    points: room.scores?.players.get(p.id) ?? 0,
+  }));
 
   return {
     code: room.code,
     state: room.state,
     turnTeam: room.turnTeam,
-    teamNames: TEAM_NAMES,              // 👈 NEW
-    turnPlayerId: room.turnPlayerId,    // 👈 NEW
+    teamNames: TEAM_NAMES,
+    turnPlayerId: room.turnPlayerId,
     players: Array.from(room.players.values()).map(p => ({ id: p.id, name: p.name, team: p.team })),
     weapons: { A: room.weapons.A, B: room.weapons.B },
     shipsRemaining: {
@@ -145,17 +147,19 @@ function makeSnapshot(room) {
       Amiss: Array.from(room.misses.A),
       Bmiss: Array.from(room.misses.B),
     },
+    scores: {
+      teams: { A: room.scores?.teams.A ?? 0, B: room.scores?.teams.B ?? 0 },
+      players: playerScoresArray,
+    },
   };
 }
 
 const broadcast = (room, payload) => {
   const data = JSON.stringify(payload);
-  for (const client of room.clients) {
-    try { client.send(data); } catch { /* ignore */ }
-  }
+  for (const client of room.clients) { try { client.send(data); } catch {} }
 };
 
-// ===== WS handlers =====
+// ===== WS =====
 wss.on('connection', (ws) => {
   ws.id = uuid();
   ws.roomCode = null;
@@ -164,30 +168,34 @@ wss.on('connection', (ws) => {
     let data; try { data = JSON.parse(msg); } catch { return; }
     const type = data.type;
 
-    // Crear sala
     if (type === 'createRoom') {
       const code = (Math.random().toString(36).slice(2, 8)).toUpperCase();
       const room = {
-        code, state: 'lobby', players: new Map(), clients: new Set(),
-        boards: { A: null, B: null }, hits: { A: new Set(), B: new Set() }, misses: { A: new Set(), B: new Set() },
-        weapons: { A: [], B: [] }, turnTeam: Math.random() < 0.5 ? 'A' : 'B', triviaPending: null,
-        turnPlayerId: null,                 // 👈 NEW
+        code, state: 'lobby',
+        players: new Map(), clients: new Set(),
+        boards: { A: null, B: null },
+        hits: { A: new Set(), B: new Set() },
+        misses: { A: new Set(), B: new Set() },
+        weapons: { A: [], B: [] },
+        turnTeam: Math.random() < 0.5 ? 'A' : 'B',
+        turnPlayerId: null,
+        triviaPending: null,
+        scores: { teams: { A: 0, B: 0 }, players: new Map() },
+        sunk: { A: new Set(), B: new Set() },
       };
-
       rooms.set(code, room);
 
       room.clients.add(ws);
       ws.roomCode = code;
       const player = { id: ws.id, name: data.name || 'Host', team: data.team === 'B' ? 'B' : 'A' };
       room.players.set(ws.id, player);
-      room.scores.players.set(ws.id, 0); // init puntaje jugador
+      room.scores.players.set(ws.id, 0);
 
       ws.send(JSON.stringify({ type: 'roomCreated', code }));
       broadcast(room, { type: 'roomUpdate', snapshot: makeSnapshot(room) });
       return;
     }
 
-    // Unirse
     if (type === 'joinRoom') {
       const room = rooms.get(data.code);
       if (!room) { ws.send(JSON.stringify({ type: 'error', message: 'Sala no existe' })); return; }
@@ -195,12 +203,11 @@ wss.on('connection', (ws) => {
       ws.roomCode = room.code;
       const player = { id: ws.id, name: data.name || 'Jugador', team: data.team === 'B' ? 'B' : 'A' };
       room.players.set(ws.id, player);
-      room.scores.players.set(ws.id, 0); // init puntaje jugador
+      room.scores.players.set(ws.id, 0);
       broadcast(room, { type: 'roomUpdate', snapshot: makeSnapshot(room) });
       return;
     }
 
-    // Iniciar partida
     if (type === 'startGame') {
       const room = rooms.get(ws.roomCode); if (!room) return;
       room.boards.A = placeShipsRandomly();
@@ -210,17 +217,16 @@ wss.on('connection', (ws) => {
       room.weapons = { A: [], B: [] };
       room.triviaPending = null;
       room.state = 'active';
-      room.turnPlayerId = null,
-        // reset puntajes manteniendo jugadores
-        room.scores = {
-          teams: { A: 0, B: 0 },
-          players: new Map(Array.from(room.players.keys()).map(id => [id, 0])),
-        };
+      room.turnPlayerId = null;
+      room.sunk = { A: new Set(), B: new Set() };
+      room.scores = {
+        teams: { A: 0, B: 0 },
+        players: new Map(Array.from(room.players.keys()).map(id => [id, 0])),
+      };
       broadcast(room, { type: 'roomUpdate', snapshot: makeSnapshot(room) });
       return;
     }
 
-    // Disparo
     if (type === 'fire') {
       const room = rooms.get(ws.roomCode); if (!room || room.state !== 'active') return;
       const shooter = room.players.get(ws.id); if (!shooter) return;
@@ -234,28 +240,41 @@ wss.on('connection', (ws) => {
 
       const enemy = team === 'A' ? 'B' : 'A';
       let anyHit = false;
+      const shipIdsHit = new Set();
 
       for (const [i, j] of targets) {
         const key = `${i},${j}`;
         if (room.hits[team].has(key) || room.misses[team].has(key)) continue;
         const v = room.boards[enemy][i][j];
-        if (v > 0) { room.hits[team].add(key); anyHit = true; }
-        else { room.misses[team].add(key); }
+        if (v > 0) {
+          room.hits[team].add(key);
+          anyHit = true;
+          shipIdsHit.add(v);
+          room.scores.players.set(ws.id, (room.scores.players.get(ws.id) ?? 0) + PTS_HIT);
+          room.scores.teams[team] += PTS_HIT;
+        } else {
+          room.misses[team].add(key);
+        }
       }
 
-      // consume arma si aplica
       if (weapon && weapon !== 'doubleShot') {
         const idx = room.weapons[team].indexOf(weapon);
         if (idx >= 0) room.weapons[team].splice(idx, 1);
       }
 
-      // 👇 fija jugador en turno (quien disparó)
       room.turnPlayerId = shooter.id;
 
-      // cambia el turno de equipo si falló
+      for (const shipId of shipIdsHit) {
+        if (!room.sunk[team].has(shipId) && isShipSunk(room.boards[enemy], shipId, room.hits[team])) {
+          room.sunk[team].add(shipId);
+          room.scores.players.set(ws.id, (room.scores.players.get(ws.id) ?? 0) + PTS_SINK);
+          room.scores.teams[team] += PTS_SINK;
+        }
+      }
+
       if (!anyHit) {
         room.turnTeam = enemy;
-        room.turnPlayerId = null; // hasta que alguien del nuevo equipo dispare
+        room.turnPlayerId = null;
       }
 
       const remainingEnemy = countShipsRemaining(room.boards[enemy], room.hits[team]);
@@ -265,21 +284,21 @@ wss.on('connection', (ws) => {
         return;
       }
 
-      // 👇 TRIVIA: ahora para TODOS; solo el jugador en turno puede responder
+      // === TRIVIA ===
       if (room.state === 'active' && Math.random() < TRIVIA_PROB && !room.triviaPending) {
         const card = randomChoice(TRIVIA_BANK);
         const nonce = uuid();
         room.triviaPending = {
           toTeam: team,
-          allowedPlayerId: shooter.id,  // 👈 solo esta persona puede responder
+          allowedPlayerId: shooter.id,
           nonce,
           answer: card.a,
           timeout: Date.now() + TRIVIA_TIME
         };
 
+        // FIX: canAnswer por identidad de socket
         for (const client of room.clients) {
-          const p = room.players.get(client.id);
-          const canAnswer = !!(p && p.id === shooter.id);
+          const canAnswer = (client === ws); // <— solo el socket que disparó
           const payload = {
             type: 'trivia',
             card: { q: card.q, opts: card.opts },
@@ -288,7 +307,7 @@ wss.on('connection', (ws) => {
             playerName: shooter.name,
             team: team
           };
-          try { client.send(JSON.stringify(payload)); } catch { }
+          try { client.send(JSON.stringify(payload)); } catch {}
         }
 
         setTimeout(() => {
@@ -303,8 +322,6 @@ wss.on('connection', (ws) => {
       return;
     }
 
-
-    // Responder trivia
     if (type === 'answerTrivia') {
       const room = rooms.get(ws.roomCode); if (!room || !room.triviaPending) return;
       const { nonce, answerIndex } = data;
@@ -312,9 +329,9 @@ wss.on('connection', (ws) => {
       if (pending.nonce !== nonce) return;
       if (Date.now() > pending.timeout) { room.triviaPending = null; return; }
 
-      // 👇 SOLO el jugador con permiso puede responder
+      // Solo el socket autorizado puede responder
       if (ws.id !== pending.allowedPlayerId) {
-        try { ws.send(JSON.stringify({ type: 'toast', message: '❌ No puedes responder. Le toca al jugador en turno.' })); } catch { }
+        try { ws.send(JSON.stringify({ type: 'toast', message: '❌ No puedes responder. Le toca al jugador en turno.' })); } catch {}
         return;
       }
 
@@ -325,6 +342,8 @@ wss.on('connection', (ws) => {
       if (correct) {
         const prize = randomChoice(WEAPONS);
         room.weapons[team].push(prize);
+        room.scores.players.set(ws.id, (room.scores.players.get(ws.id) ?? 0) + PTS_TRIVIA);
+        room.scores.teams[team] += PTS_TRIVIA;
         broadcast(room, { type: 'toast', message: `🏆 ¡${team} gana arma: ${prize}!` });
       } else {
         broadcast(room, { type: 'toast', message: '⏰ Respuesta incorrecta. Sin premio.' });
@@ -332,7 +351,6 @@ wss.on('connection', (ws) => {
       broadcast(room, { type: 'roomUpdate', snapshot: makeSnapshot(room) });
       return;
     }
-
   });
 
   ws.on('close', () => {
@@ -341,7 +359,7 @@ wss.on('connection', (ws) => {
     if (!room) return;
     room.clients.delete(ws);
     room.players.delete(ws.id);
-    room.scores.players.delete(ws.id);
+    room.scores?.players?.delete(ws.id);
     broadcast(room, { type: 'roomUpdate', snapshot: makeSnapshot(room) });
   });
 });
@@ -349,12 +367,11 @@ wss.on('connection', (ws) => {
 // Healthcheck
 app.get('/health', (_req, res) => res.status(200).send('ok'));
 
-// 3) Fallback SPA (excluye /ws)
+// SPA fallback (excluye /ws)
 app.get(/^\/(?!ws).*$/, (_req, res) => {
   res.sendFile(join(distPath, 'index.html'));
 });
 
-// Start (bind 0.0.0.0 para Railway/Render)
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ HTTP+WS escuchando en 0.0.0.0:${PORT}  (WS en /ws)`);
 });
