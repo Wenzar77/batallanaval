@@ -17,6 +17,7 @@ const WEAPONS = ['doubleShot', 'bomb3x3', 'crossMissile', 'radar'];
 // Equipos 🇨🇴
 const TEAM_NAMES = { A: 'Jaguares', B: 'Guacamayas' };
 
+
 // Puntaje
 const PTS_HIT = 10;     // acierto a celda con barco
 const PTS_SINK = 30;    // hundir barco
@@ -124,11 +125,13 @@ const rooms = new Map();
 
 function makeSnapshot(room) {
   const hasBoards = !!(room.boards?.A && room.boards?.B);
+
   return {
     code: room.code,
     state: room.state,
     turnTeam: room.turnTeam,
-    teamNames: room.teamNames, // <-- nombres
+    teamNames: TEAM_NAMES,              // 👈 NEW
+    turnPlayerId: room.turnPlayerId,    // 👈 NEW
     players: Array.from(room.players.values()).map(p => ({ id: p.id, name: p.name, team: p.team })),
     weapons: { A: room.weapons.A, B: room.weapons.B },
     shipsRemaining: {
@@ -141,16 +144,6 @@ function makeSnapshot(room) {
       B: Array.from(room.hits.B),
       Amiss: Array.from(room.misses.A),
       Bmiss: Array.from(room.misses.B),
-    },
-    // puntajes
-    scores: {
-      teams: { A: room.scores.teams.A, B: room.scores.teams.B },
-      players: Array.from(room.players.values()).map(p => ({
-        id: p.id,
-        name: p.name,
-        team: p.team,
-        points: room.scores.players.get(p.id) || 0
-      })),
     },
   };
 }
@@ -175,19 +168,12 @@ wss.on('connection', (ws) => {
     if (type === 'createRoom') {
       const code = (Math.random().toString(36).slice(2, 8)).toUpperCase();
       const room = {
-        code,
-        state: 'lobby',
-        players: new Map(),
-        clients: new Set(),
-        boards: { A: null, B: null },
-        hits: { A: new Set(), B: new Set() },
-        misses: { A: new Set(), B: new Set() },
-        weapons: { A: [], B: [] },
-        turnTeam: Math.random() < 0.5 ? 'A' : 'B',
-        triviaPending: null,
-        teamNames: { ...TEAM_NAMES },
-        scores: { teams: { A: 0, B: 0 }, players: new Map() },
+        code, state: 'lobby', players: new Map(), clients: new Set(),
+        boards: { A: null, B: null }, hits: { A: new Set(), B: new Set() }, misses: { A: new Set(), B: new Set() },
+        weapons: { A: [], B: [] }, turnTeam: Math.random() < 0.5 ? 'A' : 'B', triviaPending: null,
+        turnPlayerId: null,                 // 👈 NEW
       };
+
       rooms.set(code, room);
 
       room.clients.add(ws);
@@ -224,11 +210,12 @@ wss.on('connection', (ws) => {
       room.weapons = { A: [], B: [] };
       room.triviaPending = null;
       room.state = 'active';
-      // reset puntajes manteniendo jugadores
-      room.scores = {
-        teams: { A: 0, B: 0 },
-        players: new Map(Array.from(room.players.keys()).map(id => [id, 0])),
-      };
+      room.turnPlayerId = null,
+        // reset puntajes manteniendo jugadores
+        room.scores = {
+          teams: { A: 0, B: 0 },
+          players: new Map(Array.from(room.players.keys()).map(id => [id, 0])),
+        };
       broadcast(room, { type: 'roomUpdate', snapshot: makeSnapshot(room) });
       return;
     }
@@ -244,47 +231,33 @@ wss.on('connection', (ws) => {
       let targets = [[x, y]];
       if (weapon === 'bomb3x3') targets = coordsInBomb3x3(x, y);
       if (weapon === 'crossMissile') targets = coordsInCross(x, y);
-      // doubleShot = el cliente envía dos 'fire'
 
       const enemy = team === 'A' ? 'B' : 'A';
       let anyHit = false;
-      const hitShipIds = new Set();
 
       for (const [i, j] of targets) {
         const key = `${i},${j}`;
         if (room.hits[team].has(key) || room.misses[team].has(key)) continue;
         const v = room.boards[enemy][i][j];
-        if (v > 0) {
-          room.hits[team].add(key);
-          anyHit = true;
-          hitShipIds.add(v);
-          // puntos por acierto
-          room.scores.teams[team] += PTS_HIT;
-          room.scores.players.set(ws.id, (room.scores.players.get(ws.id) || 0) + PTS_HIT);
-        } else {
-          room.misses[team].add(key);
-        }
+        if (v > 0) { room.hits[team].add(key); anyHit = true; }
+        else { room.misses[team].add(key); }
       }
 
-      // Bonus por hundimiento (si aplica)
-      for (const shipId of hitShipIds) {
-        if (isShipSunk(room.boards[enemy], shipId, room.hits[team])) {
-          room.scores.teams[team] += PTS_SINK;
-          room.scores.players.set(ws.id, (room.scores.players.get(ws.id) || 0) + PTS_SINK);
-          broadcast(room, { type: 'toast', message: `🚢 ¡${room.teamNames[team]} hunde un barco (+${PTS_SINK})!` });
-        }
-      }
-
-      // Consumir arma (excepto doubleShot que se gestiona en el cliente)
+      // consume arma si aplica
       if (weapon && weapon !== 'doubleShot') {
         const idx = room.weapons[team].indexOf(weapon);
         if (idx >= 0) room.weapons[team].splice(idx, 1);
       }
 
-      // Cambiar turno solo si NO acertó
-      if (!anyHit) room.turnTeam = enemy;
+      // 👇 fija jugador en turno (quien disparó)
+      room.turnPlayerId = shooter.id;
 
-      // ¿Victoria?
+      // cambia el turno de equipo si falló
+      if (!anyHit) {
+        room.turnTeam = enemy;
+        room.turnPlayerId = null; // hasta que alguien del nuevo equipo dispare
+      }
+
       const remainingEnemy = countShipsRemaining(room.boards[enemy], room.hits[team]);
       if (remainingEnemy === 0) {
         room.state = `finished_${team}`;
@@ -292,24 +265,35 @@ wss.on('connection', (ws) => {
         return;
       }
 
-      // ¿Trivia?
+      // 👇 TRIVIA: ahora para TODOS; solo el jugador en turno puede responder
       if (room.state === 'active' && Math.random() < TRIVIA_PROB && !room.triviaPending) {
         const card = randomChoice(TRIVIA_BANK);
         const nonce = uuid();
-        room.triviaPending = { toTeam: team, nonce, answer: card.a, timeout: Date.now() + TRIVIA_TIME };
+        room.triviaPending = {
+          toTeam: team,
+          allowedPlayerId: shooter.id,  // 👈 solo esta persona puede responder
+          nonce,
+          answer: card.a,
+          timeout: Date.now() + TRIVIA_TIME
+        };
 
-        // Enviar solo a jugadores del equipo en turno
         for (const client of room.clients) {
           const p = room.players.get(client.id);
-          if (p && p.team === team) {
-            try { client.send(JSON.stringify({ type: 'trivia', card: { q: card.q, opts: card.opts }, nonce })); } catch {}
-          }
+          const canAnswer = !!(p && p.id === shooter.id);
+          const payload = {
+            type: 'trivia',
+            card: { q: card.q, opts: card.opts },
+            nonce,
+            canAnswer,
+            playerName: shooter.name,
+            team: team
+          };
+          try { client.send(JSON.stringify(payload)); } catch { }
         }
 
-        // Expira
         setTimeout(() => {
           if (room.triviaPending && room.triviaPending.nonce === nonce) {
-            room.triviaPending = null; // sin premio
+            room.triviaPending = null;
             broadcast(room, { type: 'roomUpdate', snapshot: makeSnapshot(room) });
           }
         }, TRIVIA_TIME + 1000);
@@ -319,6 +303,7 @@ wss.on('connection', (ws) => {
       return;
     }
 
+
     // Responder trivia
     if (type === 'answerTrivia') {
       const room = rooms.get(ws.roomCode); if (!room || !room.triviaPending) return;
@@ -327,6 +312,12 @@ wss.on('connection', (ws) => {
       if (pending.nonce !== nonce) return;
       if (Date.now() > pending.timeout) { room.triviaPending = null; return; }
 
+      // 👇 SOLO el jugador con permiso puede responder
+      if (ws.id !== pending.allowedPlayerId) {
+        try { ws.send(JSON.stringify({ type: 'toast', message: '❌ No puedes responder. Le toca al jugador en turno.' })); } catch { }
+        return;
+      }
+
       const correct = (answerIndex === pending.answer);
       const team = pending.toTeam;
       room.triviaPending = null;
@@ -334,17 +325,14 @@ wss.on('connection', (ws) => {
       if (correct) {
         const prize = randomChoice(WEAPONS);
         room.weapons[team].push(prize);
-        // puntos trivia
-        room.scores.teams[team] += PTS_TRIVIA;
-        room.scores.players.set(ws.id, (room.scores.players.get(ws.id) || 0) + PTS_TRIVIA);
-
-        broadcast(room, { type: 'toast', message: `🏆 ¡${room.teamNames[team]} gana arma: ${prize} (+${PTS_TRIVIA})!` });
+        broadcast(room, { type: 'toast', message: `🏆 ¡${team} gana arma: ${prize}!` });
       } else {
         broadcast(room, { type: 'toast', message: '⏰ Respuesta incorrecta. Sin premio.' });
       }
       broadcast(room, { type: 'roomUpdate', snapshot: makeSnapshot(room) });
       return;
     }
+
   });
 
   ws.on('close', () => {

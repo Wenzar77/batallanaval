@@ -1,11 +1,11 @@
 // src/components/ScoreScreen.tsx
 import React from 'react';
-import {
-  Box, Paper, Typography, Stack, Chip, Avatar, Grid
-} from '@mui/material';
+import { Box, Paper, Typography, Stack, Chip, Avatar, Grid } from '@mui/material';
+import { keyframes } from '@mui/system';
 
-// Tipos mínimos para que sea independiente del archivo App
 type Team = 'A' | 'B';
+
+type Player = { id: string; name: string; team: Team; points: number };
 
 type Snapshot = {
   code: string;
@@ -14,19 +14,35 @@ type Snapshot = {
   teamNames?: { A: string; B: string };
   weapons: Record<Team, string[]>;
   shipsRemaining: Record<Team, number>;
-  scores?: {
-    teams: Record<Team, number>;
-    players: { id: string; name: string; team: Team; points: number }[];
-  };
+  scores?: { teams: Record<Team, number>; players: Player[] };
 };
 
 type Props = {
   snapshot: Snapshot;
-  teamNames: { A: string; B: string };          // ya viene con fallback aplicado
-  teamIcons: { A: string; B: string };          // íconos (🐆 / 🦜) desde App
+  teamNames: { A: string; B: string };
+  teamIcons: { A: string; B: string };
+  /** opcional: si en el futuro el server envía el jugador exacto en turno */
+  activePlayerId?: string | null;
 };
 
-export default function ScoreScreen({ snapshot, teamNames, teamIcons }: Props) {
+// Animaciones
+const pulseGlow = keyframes`
+  0%   { box-shadow: 0 0 0 0 rgba(255,193,7,0.55); }
+  60%  { box-shadow: 0 0 24px 10px rgba(255,193,7,0.25); }
+  100% { box-shadow: 0 0 0 0 rgba(255,193,7,0.0); }
+`;
+
+const blinkText = keyframes`
+  0%   { text-shadow: 0 0 0 rgba(255,193,7,0); }
+  100% { text-shadow: 0 0 10px rgba(255,193,7,0.9); }
+`;
+
+export default function ScoreScreen({
+  snapshot,
+  teamNames,
+  teamIcons,
+  activePlayerId = null,
+}: Props) {
   const scores = snapshot.scores ?? { teams: { A: 0, B: 0 }, players: [] };
   const totalTeamA = scores.teams.A || 0;
   const totalTeamB = scores.teams.B || 0;
@@ -43,8 +59,8 @@ export default function ScoreScreen({ snapshot, teamNames, teamIcons }: Props) {
             snapshot.state === 'active'
               ? `Turno: ${snapshot.turnTeam === 'A' ? teamNames.A : teamNames.B}`
               : snapshot.state.startsWith('finished_')
-              ? `Ganó ${snapshot.state.endsWith('A') ? teamNames.A : teamNames.B}`
-              : 'En lobby'
+                ? `Ganó ${snapshot.state.endsWith('A') ? teamNames.A : teamNames.B}`
+                : 'En lobby'
           }
           sx={{ fontSize: 18, p: 2 }}
         />
@@ -52,7 +68,7 @@ export default function ScoreScreen({ snapshot, teamNames, teamIcons }: Props) {
 
       <Grid container spacing={3}>
         {/* Marcador Equipo A */}
-        <Grid item xs={12} md={6}>
+        <Grid size={6}>
           <Paper sx={{ p: 3, bgcolor: '#fff' }}>
             <Stack direction="row" alignItems="center" spacing={1}>
               <Avatar sx={{ width: 28, height: 28, fontSize: 18 }}>{teamIcons.A}</Avatar>
@@ -68,7 +84,7 @@ export default function ScoreScreen({ snapshot, teamNames, teamIcons }: Props) {
         </Grid>
 
         {/* Marcador Equipo B */}
-        <Grid item xs={12} md={6}>
+        <Grid size={6}>
           <Paper sx={{ p: 3, bgcolor: '#fff' }}>
             <Stack direction="row" alignItems="center" spacing={1}>
               <Avatar sx={{ width: 28, height: 28, fontSize: 18 }}>{teamIcons.B}</Avatar>
@@ -84,30 +100,70 @@ export default function ScoreScreen({ snapshot, teamNames, teamIcons }: Props) {
         </Grid>
 
         {/* Tabla de jugadores */}
-        <Grid item xs={12}>
+        <Grid size={12}>
           <Paper sx={{ p: 3, bgcolor: '#fff' }}>
             <Typography variant="h5" gutterBottom>Jugadores</Typography>
             <Grid container spacing={2}>
-              {playersSorted.map((p, idx) => (
-                <Grid key={p.id} item xs={12} md={6} lg={4}>
-                  <Paper sx={{ p: 2, bgcolor: '#fff', display: 'flex', alignItems: 'center', gap: 2 }}>
-                    <Chip
-                      label={idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : idx + 1}
-                      color={p.team === 'A' ? 'primary' : 'success'}
-                    />
-                    <Avatar sx={{ width: 28, height: 28, fontSize: 16 }}>
-                      {p.team === 'A' ? teamIcons.A : teamIcons.B}
-                    </Avatar>
-                    <Box sx={{ flexGrow: 1 }}>
-                      <Typography sx={{ fontWeight: 700 }}>{p.name}</Typography>
-                      <Typography variant="body2" sx={{ opacity: 0.8 }}>
-                        {p.team === 'A' ? teamNames.A : teamNames.B}
+              {playersSorted.map((p, idx) => {
+                // Si hay activePlayerId lo usamos; si no, resaltamos a todos los del equipo en turno
+                const isActive = activePlayerId
+                  ? p.id === activePlayerId
+                  : p.team === snapshot.turnTeam;
+
+                return (
+                  <Grid key={p.id} size={12}>
+                    <Paper
+                      sx={{
+                        p: 2,
+                        bgcolor: '#fff',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 2,
+                        borderRadius: 2,
+                        border: isActive ? '2px solid #ffc107' : '1px solid #e0e0e0',
+                        animation: isActive ? `${pulseGlow} 1.6s ease-in-out infinite` : 'none',
+                        transform: isActive ? 'translateZ(0)' : 'none',
+                      }}
+                    >
+                      <Chip
+                        label={idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : idx + 1}
+                        color={p.team === 'A' ? 'primary' : 'success'}
+                      />
+                      <Avatar sx={{ width: 28, height: 28, fontSize: 16 }}>
+                        {p.team === 'A' ? teamIcons.A : teamIcons.B}
+                      </Avatar>
+
+                      <Box sx={{ flexGrow: 1 }}>
+                        <Typography
+                          sx={{
+                            fontWeight: 800,
+                            display: 'inline-block',
+                            animation: isActive ? `${blinkText} 0.9s ease-in-out infinite alternate` : 'none',
+                          }}
+                        >
+                          {p.name}
+                        </Typography>
+                        <Typography variant="body2" sx={{ opacity: 0.8 }}>
+                          {p.team === 'A' ? teamNames.A : teamNames.B}
+                        </Typography>
+                      </Box>
+
+                      {isActive && (
+                        <Chip
+                          size="small"
+                          color="warning"
+                          label="¡Tu turno!"
+                          sx={{ fontWeight: 700 }}
+                        />
+                      )}
+
+                      <Typography variant="h6" sx={{ minWidth: 72, textAlign: 'right' }}>
+                        {p.points} pts
                       </Typography>
-                    </Box>
-                    <Typography variant="h6">{p.points} pts</Typography>
-                  </Paper>
-                </Grid>
-              ))}
+                    </Paper>
+                  </Grid>
+                );
+              })}
             </Grid>
           </Paper>
         </Grid>

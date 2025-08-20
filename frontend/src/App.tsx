@@ -31,6 +31,7 @@ type Snapshot = {
   weapons: Record<Team, string[]>;
   shipsRemaining: Record<Team, number>;
   gridSize: number;
+  turnPlayerId?: string | null;   // 👈 NEW
   history: { A: string[]; B: string[]; Amiss: string[]; Bmiss: string[] };
   scores?: {
     teams: Record<Team, number>;
@@ -43,7 +44,14 @@ const DEFAULT_TEAM_NAMES: Record<Team, string> = { A: 'Jaguares', B: 'Guacamayas
 const TEAM_ICONS: Record<Team, string> = { A: '🐆', B: '🦜' };
 
 // Trivia message
-type TriviaMsg = { card: { q: string; opts: string[] }; nonce: string };
+type TriviaMsg = {
+  card: { q: string; opts: string[] };
+  nonce: string;
+  canAnswer: boolean;        // 👈 NEW
+  playerName: string;        // 👈 NEW (quien puede responder)
+  team: Team;                // 👈 NEW (equipo en turno cuando salió la trivia)
+};
+
 
 // ---- Render de celda / tablero ----
 function Cell({ state }: { state: 'unknown' | 'hit' | 'miss' }) {
@@ -101,9 +109,18 @@ export default function App() {
   const [weaponToUse, setWeaponToUse] = useState<string | null>(null);
   const [doubleShotPending, setDoubleShotPending] = useState<number>(0);
 
-  // Nombres seguros e iconos
+
+
+  // justo después de:
   const teamNames = snapshot?.teamNames ?? DEFAULT_TEAM_NAMES;
   const enemyTeam: Team = team === 'A' ? 'B' : 'A';
+
+  // añade:
+  const turnPlayerName =
+    snapshot?.turnPlayerId
+      ? (snapshot.players.find(p => p.id === snapshot.turnPlayerId)?.name ?? null)
+      : null;
+
 
   // ---- Conexión WS ----
   useEffect(() => {
@@ -180,7 +197,14 @@ export default function App() {
 
   // ---- Pantalla de marcador dedicada ----
   if (isScreen && snapshot) {
-    return <ScoreScreen snapshot={snapshot} teamNames={teamNames} teamIcons={TEAM_ICONS} />;
+    return (
+      <ScoreScreen
+        snapshot={snapshot}
+        teamNames={teamNames}
+        teamIcons={TEAM_ICONS}
+        activePlayerId={snapshot.turnPlayerId ?? null} // 👈 clave
+      />
+    );
   }
 
   // ---- UI principal ----
@@ -300,9 +324,19 @@ export default function App() {
             {/* Panel derecha: info, armas, estado */}
             <Grid item xs={12} md={4}>
               <Paper sx={{ p: 2, mb: 2 }}>
-                <Typography variant="subtitle1">
-                  Sala: <b>{snapshot.code}</b>
+                <Typography
+                  variant="subtitle1"
+                  sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}
+                >
+                  Turno:
+                  <Chip
+                    size="small"
+                    color="info"
+                    avatar={<Avatar>{TEAM_ICONS[snapshot.turnTeam]}</Avatar>}
+                    label={`${snapshot.turnTeam} — ${teamNames[snapshot.turnTeam]}${turnPlayerName ? ' · ' + turnPlayerName : ''}`}
+                  />
                 </Typography>
+
 
                 <Typography
                   variant="subtitle1"
@@ -384,35 +418,40 @@ export default function App() {
 
       {/* Trivia Dialog */}
       {trivia && (
-        <Paper
-          sx={{
-            position: 'fixed',
-            inset: 0,
-            bgcolor: 'rgba(0,0,0,0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            p: 2
-          }}
-        >
+        <Paper sx={{ position: 'fixed', inset: 0, bgcolor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', p: 2 }}>
           <Paper sx={{ p: 3, maxWidth: 600 }}>
-            <Typography variant="h6" gutterBottom>
-              Pregunta sorpresa
-            </Typography>
+            <Typography variant="h6" gutterBottom>Pregunta sorpresa</Typography>
+
+            {/* Indica claramente quién debe responder */}
+            <Alert severity={trivia.canAnswer ? 'success' : 'warning'} sx={{ mb: 2 }}>
+              {trivia.canAnswer
+                ? '¡Te toca responder!'
+                : `Responde ${trivia.playerName} — ${teamNames[trivia.team]}`}
+            </Alert>
+
             <Typography sx={{ mb: 2 }}>{trivia.card.q}</Typography>
             <Stack spacing={1}>
               {trivia.card.opts.map((opt, idx) => (
-                <Button key={idx} variant="outlined" onClick={() => answerTrivia(idx)}>
+                <Button
+                  key={idx}
+                  variant="outlined"
+                  onClick={() => trivia.canAnswer && answerTrivia(idx)}
+                  disabled={!trivia.canAnswer}               // 👈 deshabilitado si no te toca
+                >
                   {opt}
                 </Button>
               ))}
             </Stack>
-            <Alert sx={{ mt: 2 }} severity="info">
-              Responde rápido para desbloquear un arma especial
-            </Alert>
+
+            {!trivia.canAnswer && (
+              <Typography variant="caption" sx={{ mt: 1, display: 'block', opacity: 0.8 }}>
+                Solo el jugador en turno puede responder.
+              </Typography>
+            )}
           </Paper>
         </Paper>
       )}
+
 
       <Snackbar open={!!toast} autoHideDuration={3000} onClose={() => setToast(null)}>
         <Alert severity="success" onClose={() => setToast(null)}>
