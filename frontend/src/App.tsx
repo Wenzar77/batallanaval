@@ -16,6 +16,9 @@ import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import Grid from '@mui/material/GridLegacy';
 // arriba de App.tsx
 import ScoreScreen from './components/ScoreScreen';
+import { FormControl, InputLabel, Select, MenuItem } from '@mui/material';
+import type { SelectChangeEvent } from '@mui/material/Select';
+
 
 
 // ---- Tipos y constantes ----
@@ -109,17 +112,19 @@ export default function App() {
   const [weaponToUse, setWeaponToUse] = useState<string | null>(null);
   const [doubleShotPending, setDoubleShotPending] = useState<number>(0);
 
+  const handleTeamChange = (e: SelectChangeEvent) => {
+    setTeam(e.target.value as Team);
+  };
 
 
   // justo después de:
   const teamNames = snapshot?.teamNames ?? DEFAULT_TEAM_NAMES;
   const enemyTeam: Team = team === 'A' ? 'B' : 'A';
 
-  // añade:
-  const turnPlayerName =
-    snapshot?.turnPlayerId
-      ? (snapshot.players.find(p => p.id === snapshot.turnPlayerId)?.name ?? null)
-      : null;
+  const turnPlayer = snapshot?.turnPlayerId
+    ? snapshot.players.find(p => p.id === snapshot.turnPlayerId)
+    : undefined;
+  const turnPlayerName = turnPlayer?.name ?? null;
 
 
   // ---- Conexión WS ----
@@ -246,16 +251,31 @@ export default function App() {
                 onChange={(e) => setName(e.target.value)}
               />
             </Grid>
-            <Grid item xs={12} md={2}>
-              <TextField
-                fullWidth
-                label="Equipo (A/B)"
-                value={team}
-                onChange={(e) =>
-                  setTeam((e.target.value.toUpperCase() === 'B' ? 'B' : 'A') as Team)
-                }
-              />
+            <Grid item xs={12} md={3}>
+              <FormControl fullWidth>
+                <InputLabel id="team-label">Tu equipo</InputLabel>
+                <Select
+                  labelId="team-label"
+                  label="Tu equipo"
+                  value={team}
+                  onChange={handleTeamChange}
+                >
+                  <MenuItem value="A">
+                    <Stack direction="row" alignItems="center" spacing={1}>
+                      <Avatar sx={{ width: 20, height: 20, fontSize: 14 }}>🐆</Avatar>
+                      <span>{teamNames.A} (A)</span>
+                    </Stack>
+                  </MenuItem>
+                  <MenuItem value="B">
+                    <Stack direction="row" alignItems="center" spacing={1}>
+                      <Avatar sx={{ width: 20, height: 20, fontSize: 14 }}>🦜</Avatar>
+                      <span>{teamNames.B} (B)</span>
+                    </Stack>
+                  </MenuItem>
+                </Select>
+              </FormControl>
             </Grid>
+
             <Grid item xs={12} md={7}>
               <Stack direction="row" spacing={1}>
                 <Button variant="contained" startIcon={<GroupAddIcon />} onClick={createRoom}>
@@ -333,21 +353,7 @@ export default function App() {
                     size="small"
                     color="info"
                     avatar={<Avatar>{TEAM_ICONS[snapshot.turnTeam]}</Avatar>}
-                    label={`${snapshot.turnTeam} — ${teamNames[snapshot.turnTeam]}${turnPlayerName ? ' · ' + turnPlayerName : ''}`}
-                  />
-                </Typography>
-
-
-                <Typography
-                  variant="subtitle1"
-                  sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}
-                >
-                  Turno:
-                  <Chip
-                    size="small"
-                    color="info"
-                    avatar={<Avatar>{TEAM_ICONS[snapshot.turnTeam]}</Avatar>}
-                    label={`${snapshot.turnTeam} — ${teamNames[snapshot.turnTeam]}`}
+                    label={`${teamNames[snapshot.turnTeam]}${turnPlayerName ? ' · ' + turnPlayerName : ' · esperando jugador...'}`}
                   />
                 </Typography>
 
@@ -415,6 +421,38 @@ export default function App() {
           </Grid>
         )}
       </Container>
+
+      {snapshot && (
+        <Box sx={{ mt: 2 }}>
+          <Alert
+            severity="info"
+            icon={false}
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1,
+              fontSize: 16,
+              '& .MuiAlert-message': { width: '100%' }
+            }}
+          >
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <Avatar sx={{ width: 26, height: 26, fontSize: 16 }}>
+                {TEAM_ICONS[snapshot.turnTeam]}
+              </Avatar>
+              <b>{teamNames[snapshot.turnTeam]}</b>
+              <span>•</span>
+              <span>
+                {turnPlayerName ? (
+                  <>Turno de <b>{turnPlayerName}</b></>
+                ) : (
+                  <>Esperando jugador del equipo</>
+                )}
+              </span>
+            </Stack>
+          </Alert>
+        </Box>
+      )}
+
 
       {/* Trivia Dialog */}
       {trivia && (
