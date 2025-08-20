@@ -66,13 +66,8 @@ export default function App() {
   const [doubleShotPending, setDoubleShotPending] = useState<number>(0)
 
   useEffect(() => {
-    // toma la URL de entorno en prod; usa local en dev
-    const base = (import.meta.env.PROD
-      ? (import.meta.env.VITE_WS_URL || '').trim()
-      : 'ws://localhost:3000/ws');
-
-    // sanitiza doble slash al final
-    const wsUrl = base.replace(/\/+$/, '');
+    
+    const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:3000/ws';     
     console.log('WS URL ->', wsUrl);
 
     const socket = new WebSocket(wsUrl);
