@@ -80,17 +80,7 @@ function countShipsRemaining(board, enemyHitsSet) {
 const randomChoice = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const uuid = () => crypto.randomUUID();
 
-const TRIVIA_BANK = [
-  { q: '¿Qué ciudad amazónica fue ocupada por Perú en 1932, detonando el conflicto con Colombia?', opts: ['Iquitos', 'Leticia', 'Manaos'], a: 1 },
-  { q: '¿En qué río hubo acciones navales durante 1932–33?', opts: ['Putumayo', 'Caquetá', 'Amazonas'], a: 2 },
-  { q: 'En la Guerra de los Mil Días, ¿qué color representaba a los liberales?', opts: ['Azul', 'Rojo', 'Blanco'], a: 1 },
-  { q: 'Una causa económica clave de la Guerra de los Mil Días fue:', opts: ['Oro', 'Banano', 'Café'], a: 2 },
-  { q: 'En 1863, Colombia venció a Ecuador en la batalla de:', opts: ['Pichincha', 'Boyacá', 'Cuaspud'], a: 2 },
-  { q: '¿Qué presidente ecuatoriano enfrentó a Colombia en 1863?', opts: ['Eloy Alfaro', 'Gabriel García Moreno', 'Antonio Borrero'], a: 1 },
-  { q: 'La independencia de la Nueva Granada se consolidó con la batalla de:', opts: ['Ayacucho', 'Boyacá', 'Junín'], a: 1 },
-  { q: 'La Campaña Libertadora de 1819 tuvo como objetivo principal:', opts: ['Expulsar tropas realistas', 'Conquistar Panamá', 'Firmar tratado con Perú'], a: 0 },
-  { q: 'País con disputas marítimas recientes con Colombia en el Caribe:', opts: ['Nicaragua', 'Bolivia', 'Uruguay'], a: 0 },
-];
+import { TRIVIA_BANK } from './data/trivia.js';
 
 // ===== estado de salas =====
 const rooms = new Map();
