@@ -312,6 +312,18 @@ export default function App() {
                 >
                   Iniciar
                 </Button>
+                <Button
+                  variant="outlined"
+                  color="warning"
+                  onClick={() => {
+                    if (ws) {
+                      ws.send(JSON.stringify({ type: 'changeTeam' }));
+                    }
+                  }}
+                >
+                  Cambiar de equipo
+                </Button>
+
               </Stack>
             </Grid>
           </Grid>
@@ -503,14 +515,19 @@ export default function App() {
 
 
       <Snackbar open={!!toast} autoHideDuration={3000} onClose={() => setToast(null)}>
-        {/* Indica claramente quién debe responder */}
-        <Alert severity={trivia.canAnswer ? 'success' : 'warning'} sx={{ mb: 2 }}>
-          {trivia.canAnswer
-            ? '¡Te toca responder!'
-            : <>Responde <b>{safePlayerName}</b> — <b>{safeTeamName}</b></>}
-        </Alert>
-
+        {trivia ? (
+          <Alert severity={trivia.canAnswer ? 'success' : 'warning'} sx={{ mb: 2 }}>
+            {trivia.canAnswer
+              ? '¡Te toca responder!'
+              : <>Responde <b>{safePlayerName}</b> — <b>{safeTeamName}</b></>}
+          </Alert>
+        ) : (
+          <Alert onClose={() => setToast(null)} severity="info" sx={{ width: '100%' }}>
+            {toast}
+          </Alert>
+        )}
       </Snackbar>
+
     </>
   );
 }

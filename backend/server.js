@@ -156,7 +156,7 @@ function makeSnapshot(room) {
 
 const broadcast = (room, payload) => {
   const data = JSON.stringify(payload);
-  for (const client of room.clients) { try { client.send(data); } catch {} }
+  for (const client of room.clients) { try { client.send(data); } catch { } }
 };
 
 // ===== WS =====
@@ -167,6 +167,22 @@ wss.on('connection', (ws) => {
   ws.on('message', (msg) => {
     let data; try { data = JSON.parse(msg); } catch { return; }
     const type = data.type;
+
+    if (type === 'changeTeam') {
+      const room = rooms.get(ws.roomCode);
+      if (!room) return;
+
+      const player = room.players.get(ws.id);
+      if (!player) return;
+
+      // Cambiar equipo (si es A => B, si es B => A)
+      player.team = player.team === 'A' ? 'B' : 'A';
+
+      // Notificar a todos
+      broadcast(room, { type: 'roomUpdate', snapshot: makeSnapshot(room) });
+      return;
+    }
+
 
     if (type === 'createRoom') {
       const code = (Math.random().toString(36).slice(2, 8)).toUpperCase();
@@ -288,26 +304,31 @@ wss.on('connection', (ws) => {
       if (room.state === 'active' && Math.random() < TRIVIA_PROB && !room.triviaPending) {
         const card = randomChoice(TRIVIA_BANK);
         const nonce = uuid();
+
         room.triviaPending = {
           toTeam: team,
-          allowedPlayerId: shooter.id,
+          allowedPlayerId: shooter.id,      // <— usa ID persistente del jugador
           nonce,
           answer: card.a,
           timeout: Date.now() + TRIVIA_TIME
         };
 
-        // FIX: canAnswer por identidad de socket
+        // Envía a todos, pero marca canAnswer solo para el jugador autorizado (por ID)
         for (const client of room.clients) {
-          const canAnswer = (client === ws); // <— solo el socket que disparó
-          const payload = {
-            type: 'trivia',
-            card: { q: card.q, opts: card.opts },
-            nonce,
-            canAnswer,
-            playerName: shooter.name,
-            team: team
-          };
-          try { client.send(JSON.stringify(payload)); } catch {}
+          try {
+            if (client.readyState !== 1) continue; // 1 === OPEN
+            const canAnswer = (client.id === shooter.id);
+            const payload = {
+              type: 'trivia',
+              card: { q: card.q, opts: card.opts },
+              nonce,
+              canAnswer,
+              playerName: shooter.name,
+              team: team,
+              allowedPlayerId: shooter.id      // <— opcional, útil al front
+            };
+            client.send(JSON.stringify(payload));
+          } catch { }
         }
 
         setTimeout(() => {
@@ -331,7 +352,7 @@ wss.on('connection', (ws) => {
 
       // Solo el socket autorizado puede responder
       if (ws.id !== pending.allowedPlayerId) {
-        try { ws.send(JSON.stringify({ type: 'toast', message: '❌ No puedes responder. Le toca al jugador en turno.' })); } catch {}
+        try { ws.send(JSON.stringify({ type: 'toast', message: '❌ No puedes responder. Le toca al jugador en turno.' })); } catch { }
         return;
       }
 
