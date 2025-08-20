@@ -18,6 +18,9 @@ import Grid from '@mui/material/GridLegacy';
 import ScoreScreen from './components/ScoreScreen';
 import { FormControl, InputLabel, Select, MenuItem } from '@mui/material';
 import type { SelectChangeEvent } from '@mui/material/Select';
+import CloseIcon from '@mui/icons-material/Close';
+import IconButton from '@mui/material/IconButton';
+
 
 
 
@@ -116,6 +119,7 @@ export default function App() {
     setTeam(e.target.value as Team);
   };
 
+  const closeTrivia = () => setTrivia(null);
 
   // justo después de:
   const teamNames = snapshot?.teamNames ?? DEFAULT_TEAM_NAMES;
@@ -152,11 +156,23 @@ export default function App() {
       if (data.type === 'roomUpdate') setSnapshot(data.snapshot);
       if (data.type === 'toast') setToast(data.message);
       if (data.type === 'trivia') { console.log('[TRIVIA RX]', data); setTrivia(data); }
+      if (data.type === 'triviaEnd') {        
+        //setTrivia((curr) => (curr && curr.nonce === data.nonce ? null : curr));        
+        setTrivia(null); 
+      }
     };
 
     setWs(socket);
     return () => socket.close();
   }, []);
+
+  useEffect(() => {
+    if (!trivia) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeTrivia(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [trivia]);
+
 
   // ---- Derivados de historia ----
   const hitsEnemy = useMemo(() => {
@@ -479,39 +495,63 @@ export default function App() {
 
       {/* Trivia Dialog */}
       {trivia && (
-        <Paper sx={{ position: 'fixed', inset: 0, bgcolor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', p: 2 }}>
-          <Paper sx={{ p: 3, maxWidth: 600 }}>
-            <Typography variant="h6" gutterBottom>Pregunta sorpresa</Typography>
+        <Box
+          sx={{
+            position: 'fixed',
+            inset: 0,
+            bgcolor: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            p: 2,
+            zIndex: 9999
+          }}
+          // clic en el fondo cierra
+          onClick={closeTrivia}
+        >
+          <Paper
+            onClick={(e) => e.stopPropagation()} // no cerrar si se hace clic dentro
+            sx={{ p: 3, maxWidth: 600, width: '100%', position: 'relative' }}
+            elevation={6}
+          >
+            {/* header con botón X */}
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+              <Typography variant="h6">Pregunta sorpresa</Typography>
+              <IconButton aria-label="Cerrar" onClick={closeTrivia} size="small">
+                <CloseIcon />
+              </IconButton>
+            </Box>
 
             {/* Indica claramente quién debe responder */}
             <Alert severity={trivia.canAnswer ? 'success' : 'warning'} sx={{ mb: 2 }}>
               {trivia.canAnswer
                 ? '¡Te toca responder!'
-                : `Responde ${trivia.playerName} — ${teamNames[trivia.team]}`}
+                : `Responde ${trivia.playerName ?? 'jugador en turno'} — ${teamNames[(trivia as any).team as 'A' | 'B'] ?? ''}`}
             </Alert>
 
             <Typography sx={{ mb: 2 }}>{trivia.card.q}</Typography>
+
             <Stack spacing={1}>
               {trivia.card.opts.map((opt, idx) => (
                 <Button
                   key={idx}
                   variant="outlined"
                   onClick={() => trivia.canAnswer && answerTrivia(idx)}
-                  disabled={!trivia.canAnswer}               // 👈 deshabilitado si no te toca
+                  disabled={!trivia.canAnswer}
                 >
                   {opt}
                 </Button>
               ))}
             </Stack>
 
-            {!trivia.canAnswer && (
-              <Typography variant="caption" sx={{ mt: 1, display: 'block', opacity: 0.8 }}>
-                Solo el jugador en turno puede responder.
-              </Typography>
-            )}
+            {/* acciones abajo: Cerrar siempre disponible */}
+            <Stack direction="row" justifyContent="flex-end" spacing={1} sx={{ mt: 2 }}>
+              <Button onClick={closeTrivia}>Cerrar</Button>
+            </Stack>
           </Paper>
-        </Paper>
+        </Box>
       )}
+
 
 
       <Snackbar open={!!toast} autoHideDuration={3000} onClose={() => setToast(null)}>

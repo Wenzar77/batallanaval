@@ -334,6 +334,14 @@ wss.on('connection', (ws) => {
         setTimeout(() => {
           if (room.triviaPending && room.triviaPending.nonce === nonce) {
             room.triviaPending = null;
+
+            // 👉 cerrar la trivia por timeout en todos los clientes
+            broadcast(room, {
+              type: 'triviaEnd',
+              nonce,
+              reason: 'timeout'
+            });
+
             broadcast(room, { type: 'roomUpdate', snapshot: makeSnapshot(room) });
           }
         }, TRIVIA_TIME + 1000);
@@ -347,31 +355,58 @@ wss.on('connection', (ws) => {
       const room = rooms.get(ws.roomCode); if (!room || !room.triviaPending) return;
       const { nonce, answerIndex } = data;
       const pending = room.triviaPending;
+
+      // Si el nonce no coincide, ignora
       if (pending.nonce !== nonce) return;
-      if (Date.now() > pending.timeout) { room.triviaPending = null; return; }
 
-      // Solo el socket autorizado puede responder
-      if (ws.id !== pending.allowedPlayerId) {
-        try { ws.send(JSON.stringify({ type: 'toast', message: '❌ No puedes responder. Le toca al jugador en turno.' })); } catch { }
-        return;
-      }
-
-      const correct = (answerIndex === pending.answer);
+      // Cierra trivia SIEMPRE en servidor antes de retornar
+      const expired = Date.now() > pending.timeout;
       const team = pending.toTeam;
-      room.triviaPending = null;
+      let correct = false;
 
-      if (correct) {
-        const prize = randomChoice(WEAPONS);
-        room.weapons[team].push(prize);
-        room.scores.players.set(ws.id, (room.scores.players.get(ws.id) ?? 0) + PTS_TRIVIA);
-        room.scores.teams[team] += PTS_TRIVIA;
-        broadcast(room, { type: 'toast', message: `🏆 ¡${team} gana arma: ${prize}!` });
+      if (!expired) {
+        // Solo el jugador autorizado puede responder
+        if (ws.id !== pending.allowedPlayerId) {
+          try { ws.send(JSON.stringify({ type: 'toast', message: '❌ No puedes responder. Le toca al jugador en turno.' })); } catch { }
+          return;
+        }
+        correct = (answerIndex === pending.answer);
+
+        // Premio y puntaje
+        if (correct) {
+          const prize = randomChoice(WEAPONS);
+          room.weapons[team].push(prize);
+          room.scores.players.set(ws.id, (room.scores.players.get(ws.id) ?? 0) + PTS_TRIVIA);
+          room.scores.teams[team] += PTS_TRIVIA;
+          broadcast(room, { type: 'toast', message: `🏆 ¡${team} gana arma: ${prize}!` });
+        } else {
+          broadcast(room, { type: 'toast', message: '⏰ Respuesta incorrecta. Sin premio.' });
+        }
       } else {
-        broadcast(room, { type: 'toast', message: '⏰ Respuesta incorrecta. Sin premio.' });
+        // Expirada
+        broadcast(room, { type: 'toast', message: '⏳ La pregunta expiró.' });
       }
+
+      // 🔔 Notifica FIN de trivia a TODOS (siempre)
+      const endPayload = {
+        type: 'triviaEnd',
+        nonce,
+        reason: expired ? 'timeout' : 'answered',
+        correct,
+        answeredBy: expired ? null : ws.id,
+        team
+      };
+
+      // Limpia estado y emite
+      room.triviaPending = null;
+      broadcast(room, endPayload);
+
+      // Refresca snapshot
       broadcast(room, { type: 'roomUpdate', snapshot: makeSnapshot(room) });
       return;
     }
+
+
   });
 
   ws.on('close', () => {
