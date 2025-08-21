@@ -151,6 +151,14 @@ function makeSnapshot(room) {
       teams: { A: room.scores?.teams.A ?? 0, B: room.scores?.teams.B ?? 0 },
       players: playerScoresArray,
     },
+    trivia: room.triviaPending
+      ? {
+        nonce: room.triviaPending.nonce,
+        toTeam: room.triviaPending.toTeam,
+        allowedPlayerId: room.triviaPending.allowedPlayerId,
+        timeout: room.triviaPending.timeout,
+      }
+      : null,
   };
 }
 

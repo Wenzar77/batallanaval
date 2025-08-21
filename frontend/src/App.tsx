@@ -153,12 +153,27 @@ export default function App() {
     socket.onmessage = (ev) => {
       const data = JSON.parse(ev.data);
       if (data.type === 'roomCreated') setCode(data.code);
-      if (data.type === 'roomUpdate') setSnapshot(data.snapshot);
+      if (data.type === 'roomUpdate') {
+        setSnapshot(data.snapshot);
+
+        // 👇 Si el servidor dice que NO hay trivia, asegúrate de cerrar el modal
+        if (!data.snapshot.trivia) {
+          setTrivia(null);
+        } else {
+          // (opcional) si hay trivia activa y el nonce cambió, reemplaza
+          setTrivia((curr) => {
+            const s = data.snapshot.trivia;
+            if (!curr || curr.nonce !== s.nonce) return curr; // o puedes decidir sincronizar
+            return curr; // deja igual si coincide
+          });
+        }
+      }
+
       if (data.type === 'toast') setToast(data.message);
       if (data.type === 'trivia') { console.log('[TRIVIA RX]', data); setTrivia(data); }
-      if (data.type === 'triviaEnd') {        
+      if (data.type === 'triviaEnd') {
         //setTrivia((curr) => (curr && curr.nonce === data.nonce ? null : curr));        
-        setTrivia(null); 
+        setTrivia(null);
       }
     };
 
@@ -226,6 +241,12 @@ export default function App() {
   };
 
   const myWeapons = snapshot?.weapons?.[team] || [];
+
+  const weaponCounts = myWeapons.reduce<Record<string, number>>((acc, w) => {
+    acc[w] = (acc[w] || 0) + 1;
+    return acc;
+  }, {});
+
 
   // ---- Pantalla de marcador dedicada ----
   if (isScreen && snapshot) {
@@ -406,14 +427,15 @@ export default function App() {
                   Armas del equipo {team} ({teamNames[team]})
                 </Typography>
                 <Stack direction="row" spacing={1} flexWrap="wrap">
-                  {myWeapons.length === 0 && <Chip label="Sin armas" />}
-                  {myWeapons.map((w, idx) => (
+                  {Object.entries(weaponCounts).length === 0 && <Chip label="Sin armas" />}
+
+                  {Object.entries(weaponCounts).map(([w, count]) => (
                     <Chip
-                      key={idx}
+                      key={w}
                       clickable
                       color={weaponToUse === w ? 'success' : 'primary'}
                       onClick={() => setWeaponToUse(w)}
-                      label={w}
+                      label={`${w} x${count}`}   // 👈 muestra cantidad
                       icon={
                         w === 'radar' ? (
                           <RadarIcon />
@@ -427,6 +449,7 @@ export default function App() {
                       }
                     />
                   ))}
+
                 </Stack>
                 {weaponToUse && (
                   <Alert sx={{ mt: 2 }} severity="info">
@@ -440,20 +463,30 @@ export default function App() {
                   Jugadores
                 </Typography>
                 <Stack spacing={1}>
-                  {snapshot.players.map((p) => (
-                    <Stack key={p.id} direction="row" alignItems="center" spacing={1}>
-                      <Avatar sx={{ width: 28, height: 28, fontSize: 16 }}>
-                        {TEAM_ICONS[p.team]}
-                      </Avatar>
-                      <Badge
-                        color={p.team === 'A' ? 'primary' : 'secondary'}
-                        badgeContent={p.team}
-                      >
-                        <Box sx={{ pl: 1, pr: 1 }} />
-                      </Badge>
-                      <Typography>{p.name}</Typography>
-                    </Stack>
-                  ))}
+                  {snapshot.players.map((p) => {
+                    const playerScore =
+                      snapshot.scores?.players.find(sp => sp.id === p.id)?.points ?? 0;
+
+                    return (
+                      <Stack key={p.id} direction="row" alignItems="center" spacing={1}>
+                        <Avatar sx={{ width: 28, height: 28, fontSize: 16 }}>
+                          {TEAM_ICONS[p.team]}
+                        </Avatar>
+                        <Badge
+                          color={p.team === 'A' ? 'primary' : 'secondary'}
+                          badgeContent={p.team}
+                        >
+                          <Box sx={{ pl: 1, pr: 1 }} />
+                        </Badge>
+                        <Typography sx={{ flexGrow: 1 }}>{p.name}</Typography>
+                        <Chip
+                          size="small"
+                          color="success"
+                          label={`${playerScore} pts`}
+                        />
+                      </Stack>
+                    );
+                  })}
                 </Stack>
               </Paper>
             </Grid>
