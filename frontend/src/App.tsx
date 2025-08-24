@@ -418,6 +418,22 @@ export default function App() {
     return new Set(mine === 'A' ? snapshot.history.Amiss : snapshot.history.Bmiss);
   }, [snapshot, team]);
 
+  // Disparos del rival SOBRE MI tablero (defensa)
+  const hitsMine = useMemo(() => {
+    if (!snapshot) return new Set<string>();
+    const mine = team; // mi equipo
+    // si soy A, los aciertos del enemigo son los de B, y viceversa
+    return new Set(mine === 'A' ? snapshot.history.B : snapshot.history.A);
+  }, [snapshot, team]);
+
+  const missesMine = useMemo(() => {
+    if (!snapshot) return new Set<string>();
+    const mine = team;
+    return new Set(mine === 'A' ? snapshot.history.Bmiss : snapshot.history.Amiss);
+  }, [snapshot, team]);
+
+
+
   const myTurn = !!(snapshot && snapshot.state === 'active' && snapshot.turnTeam === team);
 
   // ---- Acciones ----
@@ -729,7 +745,7 @@ export default function App() {
 
         {snapshot && (
           <Grid container spacing={2}>
-            {/* Panel izquierda: tablero enemigo */}
+            {/* TABLERO DEL EQUIPO ENEMIGO */}
             <Grid size={{ xs: 12, md: 8 }}>
               <Paper
                 sx={{
@@ -777,6 +793,24 @@ export default function App() {
                   />
                 </Box>
               </Paper>
+              <Paper sx={{ p: 2, mt: 2 }}>
+                <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  Mi flota ({teamNames[team]})
+                  <Avatar sx={{ width: 24, height: 24, fontSize: 14 }}>
+                    {TEAM_ICONS[team]}
+                  </Avatar>
+                </Typography>
+
+                <Box sx={{ mt: 2, overflow: 'auto' }}>
+                  <GridBoard
+                    size={SIZE}
+                    hits={hitsMine}          // 👈 disparos que me acertaron
+                    misses={missesMine}      // 👈 disparos que fallaron en mi tablero
+                    disabled={true}          // 👈 no se puede disparar aquí
+                  />
+                </Box>
+              </Paper>
+
             </Grid>
 
             {/* Panel derecha: info, armas, estado */}
@@ -869,13 +903,7 @@ export default function App() {
                       <Stack key={p.id} direction="row" alignItems="center" spacing={1}>
                         <Avatar sx={{ width: 28, height: 28, fontSize: 16 }}>
                           {TEAM_ICONS[p.team]}
-                        </Avatar>
-                        <Badge
-                          color={p.team === 'A' ? 'primary' : 'secondary'}
-                          badgeContent={p.team}
-                        >
-                          <Box sx={{ pl: 1, pr: 1 }} />
-                        </Badge>
+                        </Avatar>                        
                         <Typography sx={{ flexGrow: 1 }}>{p.name}</Typography>
                         <Chip size="small" color="success" label={`${playerScore} pts`} />
                       </Stack>
