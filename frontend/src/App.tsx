@@ -145,6 +145,18 @@ export default function App() {
   const [doubleShotPending, setDoubleShotPending] = useState<number>(0);
   const [mode, setMode] = useState<'crear' | 'unirme'>('crear');
 
+  const leaveGame = () => {
+    if (!ws) return;
+    ws.send(JSON.stringify({ type: 'leaveRoom' }));
+    // Limpia estado local y URL para no reanudar automáticamente
+    setSnapshot(null);
+    setIsHost(false);
+    setCode('');
+    setMode('crear');
+    setQS({ [QS_CODE]: null, [QS_TOKEN]: null }); // quitamos code y token de la URL
+  };
+
+
   const handleTeamChange = (e: SelectChangeEvent) => {
     setTeam(e.target.value as Team);
   };
@@ -239,6 +251,16 @@ export default function App() {
         if (data.type === 'toast') setToast(data.message);
         if (data.type === 'trivia') setTrivia(data);
         if (data.type === 'triviaEnd') setTrivia(null);
+
+        if (data.type === 'left') {
+          // ya saliste de la sala: limpia vista
+          setSnapshot(null);
+          setIsHost(false);
+          setCode('');
+          setMode('crear');
+          setQS({ [QS_CODE]: null, [QS_TOKEN]: null });
+        }
+
       };
 
       socket.onclose = () => {
@@ -260,7 +282,7 @@ export default function App() {
 
     return () => {
       closedByUs = true;
-      try { socket?.close(); } catch {}
+      try { socket?.close(); } catch { }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // una sola vez
@@ -372,126 +394,149 @@ export default function App() {
           <Button onClick={() => window.open('/screen', '_blank')} variant="outlined">
             Abrir Pantalla
           </Button>
+          {snapshot?.state === 'active' && (
+            <Button onClick={leaveGame} color="error" variant="outlined" sx={{ ml: 1 }}>
+              Desconectarme
+            </Button>
+          )}
         </Toolbar>
       </AppBar>
 
       <Container sx={{ mt: 3 }}>
-        <Paper sx={{ p: 2, mb: 2 }}>
-          <Grid container spacing={3} alignItems="center">
-            <Grid size={{ xs: 12, md: 3 }}>
-              <TextField
-                fullWidth
-                label="Tu nombre"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </Grid>
-          </Grid>
 
-          <Grid container spacing={3} alignItems="center">
-            <Grid size={{ xs: 12, md: 3 }}>
-              <FormControl fullWidth>
-                <InputLabel id="team-label">Tu equipo</InputLabel>
-                <Select
-                  labelId="team-label"
-                  label="Tu equipo"
-                  value={team}
-                  onChange={handleTeamChange}
-                >
-                  <MenuItem value="A">
-                    <Stack direction="row" alignItems="center" spacing={1}>
-                      <Avatar sx={{ width: 20, height: 20, fontSize: 14 }}>🐆</Avatar>
-                      <span>{teamNames.A} (A)</span>
-                    </Stack>
-                  </MenuItem>
-                  <MenuItem value="B">
-                    <Stack direction="row" alignItems="center" spacing={1}>
-                      <Avatar sx={{ width: 20, height: 20, fontSize: 14 }}>🦜</Avatar>
-                      <span>{teamNames.B} (B)</span>
-                    </Stack>
-                  </MenuItem>
-                </Select>
-              </FormControl>
+        {/* Si el juego está activo, NO muestres los controles de lobby */}
+        {snapshot?.state === 'active' ? (
+          <Paper sx={{ p: 2, mb: 2 }}>
+            <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={2}>
+              <Typography variant="subtitle1" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                Sala <b>{snapshot.code}</b> • Jugando: <b>{teamNames.A}</b> vs <b>{teamNames.B}</b>
+              </Typography>
+              <Stack direction="row" spacing={1}>
+                <Chip color="success" label="Partida en curso" />
+                <Button variant="outlined" color="error" onClick={leaveGame}>
+                  Desconectarme
+                </Button>
+              </Stack>
+            </Stack>
+          </Paper>
+        ) : (
+          <Paper sx={{ p: 2, mb: 2 }}>
+            <Grid container spacing={3} alignItems="center">
+              <Grid size={{ xs: 12, md: 3 }}>
+                <TextField
+                  fullWidth
+                  label="Tu nombre"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
+              </Grid>
             </Grid>
 
-            {/* Selector Crear/Unirme */}
-            <Grid size={{ xs: 12, md: 2 }}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={mode === 'unirme'}
-                    onChange={(e) => setMode(e.target.checked ? 'unirme' : 'crear')}
-                    color="primary"
-                  />
-                }
-                label={mode === 'unirme' ? 'Unirme' : 'Crear sala'}
-              />
-            </Grid>
-
-            {/* Zona de acciones dependiente del modo */}
-            <Grid size={{ xs: 12, md: 7 }}>
-              {mode === 'crear' ? (
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <Button
-                    variant="contained"
-                    startIcon={<GroupAddIcon />}
-                    onClick={createRoom}
+            <Grid container spacing={3} alignItems="center">
+              <Grid size={{ xs: 12, md: 3 }}>
+                <FormControl fullWidth>
+                  <InputLabel id="team-label">Tu equipo</InputLabel>
+                  <Select
+                    labelId="team-label"
+                    label="Tu equipo"
+                    value={team}
+                    onChange={handleTeamChange}
                   >
-                    Crear sala
-                  </Button>
+                    <MenuItem value="A">
+                      <Stack direction="row" alignItems="center" spacing={1}>
+                        <Avatar sx={{ width: 20, height: 20, fontSize: 14 }}>🐆</Avatar>
+                        <span>{teamNames.A} (A)</span>
+                      </Stack>
+                    </MenuItem>
+                    <MenuItem value="B">
+                      <Stack direction="row" alignItems="center" spacing={1}>
+                        <Avatar sx={{ width: 20, height: 20, fontSize: 14 }}>🦜</Avatar>
+                        <span>{teamNames.B} (B)</span>
+                      </Stack>
+                    </MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
 
-                  {/* Si ya hay código, muéstralo solo como lectura */}
-                  {code && (
+              {/* Selector Crear/Unirme */}
+              <Grid size={{ xs: 12, md: 2 }}>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={mode === 'unirme'}
+                      onChange={(e) => setMode(e.target.checked ? 'unirme' : 'crear')}
+                      color="primary"
+                    />
+                  }
+                  label={mode === 'unirme' ? 'Unirme' : 'Crear sala'}
+                />
+              </Grid>
+
+              {/* Zona de acciones dependiente del modo */}
+              <Grid size={{ xs: 12, md: 7 }}>
+                {mode === 'crear' ? (
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <Button
+                      variant="contained"
+                      startIcon={<GroupAddIcon />}
+                      onClick={createRoom}
+                    >
+                      Crear sala
+                    </Button>
+
+                    {/* Si ya hay código, muéstralo solo como lectura */}
+                    {code && (
+                      <TextField
+                        size="small"
+                        label="Código de sala"
+                        value={code}
+                        InputProps={{ readOnly: true }}
+                        sx={{ width: 180 }}
+                      />
+                    )}
+
+                    <Divider orientation="vertical" flexItem sx={{ mx: 1 }} />
+
+                    <Button
+                      variant="contained"
+                      color="secondary"
+                      startIcon={<PlayArrowIcon />}
+                      onClick={startGame}
+                      disabled={!isHost}
+                    >
+                      Iniciar
+                    </Button>
+
+                    <Button sx={{ visibility: 'hidden' }}
+                      variant="outlined"
+                      color="warning"
+                      onClick={() => {
+                        if (ws) {
+                          ws.send(JSON.stringify({ type: 'changeTeam' }));
+                        }
+                      }}
+                    >
+                      Cambiar de equipo
+                    </Button>
+                  </Stack>
+                ) : (
+                  <Stack direction="row" spacing={1} alignItems="center">
                     <TextField
                       size="small"
-                      label="Código de sala"
+                      label="Código"
                       value={code}
-                      InputProps={{ readOnly: true }}
-                      sx={{ width: 180 }}
+                      onChange={(e) => setCode(e.target.value.toUpperCase())}
+                      sx={{ width: 160 }}
                     />
-                  )}
-
-                  <Divider orientation="vertical" flexItem sx={{ mx: 1 }} />
-
-                  <Button
-                    variant="contained"
-                    color="secondary"
-                    startIcon={<PlayArrowIcon />}
-                    onClick={startGame}
-                    disabled={!isHost}
-                  >
-                    Iniciar
-                  </Button>
-
-                  <Button sx={{ visibility: 'hidden' }}
-                    variant="outlined"
-                    color="warning"
-                    onClick={() => {
-                      if (ws) {
-                        ws.send(JSON.stringify({ type: 'changeTeam' }));
-                      }
-                    }}
-                  >
-                    Cambiar de equipo
-                  </Button>
-                </Stack>
-              ) : (
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <TextField
-                    size="small"
-                    label="Código"
-                    value={code}
-                    onChange={(e) => setCode(e.target.value.toUpperCase())}
-                    sx={{ width: 160 }}
-                  />
-                  <Button variant="outlined" onClick={joinRoom}>
-                    Unirme
-                  </Button>
-                </Stack>
-              )}
+                    <Button variant="outlined" onClick={joinRoom}>
+                      Unirme
+                    </Button>
+                  </Stack>
+                )}
+              </Grid>
             </Grid>
-          </Grid>
-        </Paper>
+          </Paper>
+        )}
 
         {snapshot && (
           <Grid container spacing={2}>

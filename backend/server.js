@@ -168,11 +168,11 @@ function makeSnapshot(room) {
     },
     trivia: room.triviaPending
       ? {
-          nonce: room.triviaPending.nonce,
-          toTeam: room.triviaPending.toTeam,
-          allowedPlayerId: room.triviaPending.allowedPlayerId,
-          timeout: room.triviaPending.timeout,
-        }
+        nonce: room.triviaPending.nonce,
+        toTeam: room.triviaPending.toTeam,
+        allowedPlayerId: room.triviaPending.allowedPlayerId,
+        timeout: room.triviaPending.timeout,
+      }
       : null,
   };
 }
@@ -291,7 +291,7 @@ wss.on('connection', (ws) => {
       player.disconnectedAt = null;
       byClient.set(clientId, { code, playerId: clientId });
 
-      try { ws.send(JSON.stringify({ type: 'resumed' })); } catch {}
+      try { ws.send(JSON.stringify({ type: 'resumed' })); } catch { }
       broadcast(room, { type: 'roomUpdate', snapshot: makeSnapshot(room) });
       return;
     }
@@ -465,6 +465,32 @@ wss.on('connection', (ws) => {
       return;
     }
 
+    // ------- Salir voluntariamente de la sala -------
+    if (type === 'leaveRoom') {
+      const room = rooms.get(ws.roomCode);
+      if (!room) { try { ws.send(JSON.stringify({ type: 'left' })); } catch { } return; }
+
+      // saca el socket de la lista de clientes activos
+      room.clients.delete(ws);
+
+      // elimina al jugador de la sala y su puntaje
+      const pid = ws.id;
+      room.players.delete(pid);
+      room.scores?.players?.delete(pid);
+
+      // limpia vínculo del socket a la sala
+      ws.roomCode = null;
+
+      // notifica a quien salió y al resto
+      try { ws.send(JSON.stringify({ type: 'left' })); } catch { }
+      broadcast(room, { type: 'roomUpdate', snapshot: makeSnapshot(room) });
+
+      // opcional: si no queda nadie en la sala, bórrala
+      if (room.players.size === 0 && room.clients.size === 0) {
+        rooms.delete(room.code);
+      }
+      return;
+    }
   });
 
   ws.on('close', () => {
@@ -495,6 +521,7 @@ wss.on('connection', (ws) => {
     }, 10 * 60 * 1000);
   });
 });
+
 
 // Healthcheck
 app.get('/health', (_req, res) => res.status(200).send('ok'));
