@@ -121,6 +121,18 @@ function isShipSunk(board, shipId, enemyHitsSet) {
   return true;
 }
 
+// === NUEVO: serializa todas las celdas de barcos de un board como ["i,j", ...]
+function shipCellsStrings(board) {
+  if (!board) return [];
+  const cells = [];
+  for (let i = 0; i < SIZE; i++) {
+    for (let j = 0; j < SIZE; j++) {
+      if (board[i][j] > 0) cells.push(`${i},${j}`);
+    }
+  }
+  return cells;
+}
+
 // ===== estado =====
 /*
 room = {
@@ -168,11 +180,11 @@ function makeSnapshot(room) {
     },
     trivia: room.triviaPending
       ? {
-        nonce: room.triviaPending.nonce,
-        toTeam: room.triviaPending.toTeam,
-        allowedPlayerId: room.triviaPending.allowedPlayerId,
-        timeout: room.triviaPending.timeout,
-      }
+          nonce: room.triviaPending.nonce,
+          toTeam: room.triviaPending.toTeam,
+          allowedPlayerId: room.triviaPending.allowedPlayerId,
+          timeout: room.triviaPending.timeout,
+        }
       : null,
   };
 }
@@ -181,6 +193,19 @@ const broadcast = (room, payload) => {
   const data = JSON.stringify(payload);
   for (const client of room.clients) { try { client.send(data); } catch { } }
 };
+
+// === NUEVO: envía SOLO al socket 'ws' las celdas de su flota
+function sendMyFleet(ws, room) {
+  try {
+    const player = room.players.get(ws.id);
+    if (!player) return;
+    if (!room.boards?.A || !room.boards?.B) return; // aún no hay tableros
+    const team = player.team;
+    const board = team === 'A' ? room.boards.A : room.boards.B;
+    const cells = shipCellsStrings(board); // formato ["i,j"]
+    ws.send(JSON.stringify({ type: 'myFleetCells', cells }));
+  } catch {}
+}
 
 // ===== WS =====
 wss.on('connection', (ws) => {
@@ -197,6 +222,10 @@ wss.on('connection', (ws) => {
       const player = room.players.get(ws.id);
       if (!player) return;
       player.team = player.team === 'A' ? 'B' : 'A';
+
+      // NUEVO: reenvía celdas privadas según la nueva pertenencia
+      sendMyFleet(ws, room);
+
       broadcast(room, { type: 'roomUpdate', snapshot: makeSnapshot(room) });
       return;
     }
@@ -268,6 +297,10 @@ wss.on('connection', (ws) => {
 
       room.scores.players.set(playerId, room.scores.players.get(playerId) ?? 0);
       byClient.set(playerId, { code: room.code, playerId });
+
+      // NUEVO: si ya hay tableros, manda al cliente sus celdas privadas
+      sendMyFleet(ws, room);
+
       broadcast(room, { type: 'roomUpdate', snapshot: makeSnapshot(room) });
       return;
     }
@@ -291,8 +324,20 @@ wss.on('connection', (ws) => {
       player.disconnectedAt = null;
       byClient.set(clientId, { code, playerId: clientId });
 
-      try { ws.send(JSON.stringify({ type: 'resumed' })); } catch { }
+      try { ws.send(JSON.stringify({ type: 'resumed' })); } catch {}
+
+      // NUEVO: si ya hay tableros, manda al cliente sus celdas privadas
+      sendMyFleet(ws, room);
+
       broadcast(room, { type: 'roomUpdate', snapshot: makeSnapshot(room) });
+      return;
+    }
+
+    // ------- Solicitud explícita de flota privada -------
+    if (type === 'requestMyFleet') {
+      const room = rooms.get(ws.roomCode);
+      if (!room) return;
+      sendMyFleet(ws, room);
       return;
     }
 
@@ -312,6 +357,12 @@ wss.on('connection', (ws) => {
         teams: { A: 0, B: 0 },
         players: new Map(Array.from(room.players.keys()).map(id => [id, room.scores.players.get(id) ?? 0])),
       };
+
+      // NUEVO: tras colocar tableros, envía a cada cliente SUS celdas privadas
+      for (const client of room.clients) {
+        try { sendMyFleet(client, room); } catch {}
+      }
+
       broadcast(room, { type: 'roomUpdate', snapshot: makeSnapshot(room) });
       return;
     }
@@ -521,7 +572,6 @@ wss.on('connection', (ws) => {
     }, 10 * 60 * 1000);
   });
 });
-
 
 // Healthcheck
 app.get('/health', (_req, res) => res.status(200).send('ok'));

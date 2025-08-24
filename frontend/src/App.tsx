@@ -61,7 +61,6 @@ const buildScreenUrl = (roomCode: string): string => {
   return `${base}?${params.toString()}`;
 };
 
-
 // --- Flota estándar y nombres amigables ---
 const FLEET_INFO = [
   { key: 'carrier', label: 'Portaviones', size: 5, count: 1, emoji: '🛳️' },
@@ -87,7 +86,6 @@ type Snapshot = {
   scores?: {
     teams: Record<Team, number>;
     players: { id: string; name: string; team: Team; points: number }[];
-    // NUEVO (opcional): detalle por equipo
     breakdown?: {
       teams: Record<Team, TeamBreakdown>;
     };
@@ -119,27 +117,40 @@ type TriviaMsg = {
 };
 
 // ---- Render de celda / tablero ----
-function Cell({ state }: { state: 'unknown' | 'hit' | 'miss' }) {
-  const bg = state === 'hit' ? '#d32f2f' : state === 'miss' ? '#90caf9' : '#e0e0e0';
+function Cell({ state }: { state: 'unknown' | 'hit' | 'miss' | 'ship' }) {
+  const bg =
+    state === 'hit' ? '#d32f2f' :         // impacto (rojo)
+      state === 'miss' ? '#90caf9' :        // fallo (azul claro)
+        state === 'ship' ? '#c8e6c9' :        // barco propio (verde suave)
+          '#e0e0e0';                            // desconocido
   return <Box sx={{ width: 22, height: 22, bgcolor: bg, border: '1px solid #fff' }} />;
 }
 
 function GridBoard({
-  size, hits, misses, onClick, disabled
+  size, hits, misses, onClick, disabled, ownShips, showShips
 }: {
   size: number;
   hits: Set<string>;
   misses: Set<string>;
   onClick?: (x: number, y: number) => void;
   disabled?: boolean;
+  ownShips?: Set<string>;
+  showShips?: boolean; // si true, muestra casillas de barcos propios
 }) {
   return (
     <Box sx={{ display: 'grid', gridTemplateColumns: `repeat(${size}, 22px)`, gap: 0 }}>
       {Array.from({ length: size }).map((_, i) =>
         Array.from({ length: size }).map((_, j) => {
           const key = `${i},${j}`;
-          const state: 'unknown' | 'hit' | 'miss' =
-            hits.has(key) ? 'hit' : misses.has(key) ? 'miss' : 'unknown';
+          const isHit = hits.has(key);
+          const isMiss = misses.has(key);
+          const isShip = !!ownShips?.has(key);
+
+          const state: 'unknown' | 'hit' | 'miss' | 'ship' =
+            isHit ? 'hit' :
+              isMiss ? 'miss' :
+                (showShips && isShip) ? 'ship' : 'unknown';
+
           return (
             <Box
               key={key}
@@ -159,20 +170,46 @@ function GridBoard({
 const isScreen = typeof window !== 'undefined' && window.location.pathname.endsWith('/screen');
 
 /* ===============================
-   MODAL DE FIN DE JUEGO (integrado)
+   Tip helpers para celdas de barcos (soluciona TS)
    =============================== */
+type ShipCell = { x?: number; y?: number; i?: number; j?: number } | string;
+// Normaliza "celda" a "i,j"
+const toKey = (c: ShipCell) =>
+  typeof c === 'string' ? c : `${c.x ?? c.i},${c.y ?? c.j}`;
 
-type LeaderboardRow = {
-  teamId: Team | string;
-  teamName: string;
-  points: number;
-  hits?: number;
-  sinks?: number;
-  trivia?: number;
-};
+// Lee celdas de barcos desde varias rutas posibles sin romper TS
+function getTeamShipCells(snapshot: Snapshot, team: Team, clientId?: string): string[] {
+  const s = snapshot as any; // encapsulamos flexibilidad aquí
+
+  // RUTAS por cliente (privadas)
+  const perClientCandidates: unknown[] = [
+    clientId && s?.myFleetCells?.[clientId],                 // { [clientId]: ["3,5","3,6",...] }
+    clientId && s?.playerBoards?.[clientId]?.shipCells,      // { [clientId]: { shipCells: [...] } }
+    clientId && s?.clients?.[clientId]?.shipCells,           // { clients: { [clientId]: { shipCells } } }
+  ].filter(Boolean);
+
+  if (perClientCandidates.length > 0) {
+    const flat: ShipCell[] = perClientCandidates.flatMap((v: any) => Array.isArray(v) ? v : [v]);
+    return flat.map(toKey);
+  }
+
+  // RUTAS por equipo (asegúrate de que solo vayan a tus clientes)
+  const perTeamCandidates: unknown[] = [
+    s?.board?.[team]?.shipCells,                             // { board: { A: { shipCells } } }
+    s?.fleetCells?.[team],                                   // { fleetCells: { A: [...] } }
+    s?.ownFleet?.[team],                                     // { ownFleet: { A: [...] } }
+    s?.fleet?.[team]?.cells,                                 // { fleet: { A: { cells:[{i,j}] } } }
+    Array.isArray(s?.ships?.[team]) ? s.ships[team].flatMap((ship: any) => ship?.cells ?? []) : null,
+    s?.teamFleet?.[team]?.cells,                             // { teamFleet: { A: { cells: [...] } } }
+  ].filter(Boolean);
+
+  if (perTeamCandidates.length === 0) return [];
+  const flat: ShipCell[] = perTeamCandidates.flatMap((v: any) => Array.isArray(v) ? v : [v]);
+  return flat.map(toKey);
+}
 
 /* ===============================
-   Panel de Flota (tu versión)
+   Panel de Flota
    =============================== */
 function FleetPanel({
   teamNames,
@@ -251,6 +288,9 @@ export default function App() {
   const [weaponToUse, setWeaponToUse] = useState<string | null>(null);
   const [doubleShotPending, setDoubleShotPending] = useState<number>(0);
   const [mode, setMode] = useState<'crear' | 'unirme'>('crear');
+
+  // Celdas privadas de MI flota, recibidas por WS (solo para este cliente)
+  const [myFleetCells, setMyFleetCells] = useState<string[] | null>(null);
 
   const leaveGame = () => {
     if (!ws) return;
@@ -334,6 +374,14 @@ export default function App() {
             }
           }, 600);
         }
+
+        // Pide explícitamente tus celdas al servidor (mensaje simple)
+        setTimeout(() => {
+          try {
+            socket?.send(JSON.stringify({ type: 'requestMyFleet' }));
+          } catch { }
+        }, 300);
+
       };
 
       socket.onmessage = (ev) => {
@@ -366,6 +414,17 @@ export default function App() {
           setMode('crear');
           setQS({ [QS_CODE]: null, [QS_TOKEN]: null });
         }
+
+        if (data.type === 'myFleetCells' && Array.isArray(data.cells)) {
+          // ej: { type: 'myFleetCells', cells: ["3,5","3,6", ...] }
+          setMyFleetCells(data.cells);
+        }
+
+        if (data.type === 'playerBoard' && Array.isArray(data.shipCells)) {
+          // ej: { type: 'playerBoard', shipCells: ["3,5","3,6", ...] }
+          setMyFleetCells(data.shipCells);
+        }
+
 
         // Si tu server manda evento explícito de final (opcional):
         if (data.type === 'gameOver' && data.payload?.scores) {
@@ -422,7 +481,6 @@ export default function App() {
   const hitsMine = useMemo(() => {
     if (!snapshot) return new Set<string>();
     const mine = team; // mi equipo
-    // si soy A, los aciertos del enemigo son los de B, y viceversa
     return new Set(mine === 'A' ? snapshot.history.B : snapshot.history.A);
   }, [snapshot, team]);
 
@@ -432,6 +490,16 @@ export default function App() {
     return new Set(mine === 'A' ? snapshot.history.Bmiss : snapshot.history.Amiss);
   }, [snapshot, team]);
 
+  // Tus barcos / celdas ocupadas por tu flota (busca por cliente y por equipo)
+  const ownShips = useMemo(() => {
+    // Prioridad 1: lo que ya recibí por WS de forma privada
+    if (myFleetCells && myFleetCells.length > 0) {
+      return new Set<string>(myFleetCells);
+    }
+    // Prioridad 2: intenta descubrir rutas en el snapshot (equipo/cliente)
+    if (!snapshot) return new Set<string>();
+    return new Set<string>(getTeamShipCells(snapshot, team, clientId));
+  }, [snapshot, team, clientId, myFleetCells]);
 
 
   const myTurn = !!(snapshot && snapshot.state === 'active' && snapshot.turnTeam === team);
@@ -493,7 +561,6 @@ export default function App() {
     if (!snapshot) return null;
     if (snapshot.state === 'finished_A') return 'A';
     if (snapshot.state === 'finished_B') return 'B';
-    // Si tu server define empate con otra señal, podrías devolver null ahí.
     return null;
   })();
 
@@ -508,6 +575,15 @@ export default function App() {
       | Record<Team, TeamBreakdown>
       | undefined;
   }, [snapshot]);
+
+  type LeaderboardRow = {
+    teamId: Team | string;
+    teamName: string;
+    points: number;
+    hits?: number;
+    sinks?: number;
+    trivia?: number;
+  };
 
   const finalLeaderboard: LeaderboardRow[] = useMemo(() => {
     const tn = snapshot?.teamNames ?? DEFAULT_TEAM_NAMES;
@@ -530,7 +606,6 @@ export default function App() {
   }, [snapshot, teamBreakdown]);
 
   const handleRestart = () => {
-    // Notifica reinicio al server; éste debe volver a emitir roomUpdate con state 'lobby' o 'active'
     ws?.send(JSON.stringify({ type: 'restartGame' }));
   };
 
@@ -572,7 +647,7 @@ export default function App() {
             sx={{ mr: 1 }}
           />
 
-          {/*Boton ver TABLERO*/}
+          {/* Botón ver TABLERO */}
           <Button
             onClick={() => {
               const roomCode = snapshot?.code || code;   // usa el de la sala activa
@@ -585,7 +660,7 @@ export default function App() {
             }}
             variant="contained"
             startIcon={<TvIcon />}
-            disabled={!snapshot?.code && !code}          // opcional: deshabilita si no hay sala
+            disabled={!snapshot?.code && !code}
             sx={{
               ml: 1,
               color: 'primary.main',
@@ -596,12 +671,13 @@ export default function App() {
           >
             TABLERO
           </Button>
+
           {snapshot?.state === 'active' && (
             <Button
               onClick={leaveGame}
               color="error"
               variant="contained"
-              startIcon={<PowerSettingsNewIcon />}   // 👈 aquí va el ícono
+              startIcon={<PowerSettingsNewIcon />}
               sx={{ ml: 1, bgcolor: 'white', color: 'error.main', fontWeight: 'bold' }}
             >
               DESCONECTAR
@@ -793,24 +869,37 @@ export default function App() {
                   />
                 </Box>
               </Paper>
+
+              {/* Tablero defensivo: cómo el enemigo destruye MIS barcos */}
               <Paper sx={{ p: 2, mt: 2 }}>
-                <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  Mi flota ({teamNames[team]})
-                  <Avatar sx={{ width: 24, height: 24, fontSize: 14 }}>
-                    {TEAM_ICONS[team]}
-                  </Avatar>
-                </Typography>
+                <Stack direction="row" justifyContent="space-between" alignItems="center">
+                  <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    Mi flota ({teamNames[team]})
+                    <Avatar sx={{ width: 24, height: 24, fontSize: 14 }}>
+                      {TEAM_ICONS[team]}
+                    </Avatar>
+                  </Typography>
+
+                  {/* Pequeña leyenda */}
+                  <Stack direction="row" spacing={1}>
+                    <Chip size="small" label="Barco" sx={{ bgcolor: '#c8e6c9' }} />
+                    <Chip size="small" label="Impacto" sx={{ bgcolor: '#d32f2f', color: 'white' }} />
+                    <Chip size="small" label="Fallo" sx={{ bgcolor: '#90caf9' }} />
+                  </Stack>
+                </Stack>
+                
 
                 <Box sx={{ mt: 2, overflow: 'auto' }}>
                   <GridBoard
                     size={SIZE}
-                    hits={hitsMine}          // 👈 disparos que me acertaron
-                    misses={missesMine}      // 👈 disparos que fallaron en mi tablero
-                    disabled={true}          // 👈 no se puede disparar aquí
+                    hits={hitsMine}          // impactos del rival sobre mí
+                    misses={missesMine}      // fallos del rival sobre mí
+                    ownShips={ownShips}      // 👈 pinta mis barcos
+                    showShips                // 👈 activa color de barco
+                    disabled                 // tablero no clickeable
                   />
                 </Box>
               </Paper>
-
             </Grid>
 
             {/* Panel derecha: info, armas, estado */}
@@ -903,7 +992,7 @@ export default function App() {
                       <Stack key={p.id} direction="row" alignItems="center" spacing={1}>
                         <Avatar sx={{ width: 28, height: 28, fontSize: 16 }}>
                           {TEAM_ICONS[p.team]}
-                        </Avatar>                        
+                        </Avatar>
                         <Typography sx={{ flexGrow: 1 }}>{p.name}</Typography>
                         <Chip size="small" color="success" label={`${playerScore} pts`} />
                       </Stack>
