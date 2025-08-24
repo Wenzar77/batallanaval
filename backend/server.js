@@ -35,6 +35,20 @@ const wss = new WebSocketServer({ server, path: '/ws' });
 const uuid = () => crypto.randomUUID();
 const randomChoice = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
+// Código de sala sin I/O/0/1 para evitar confusiones
+const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function generateCode(rooms, length = 5) {
+  let code = '';
+  do {
+    code = '';
+    for (let i = 0; i < length; i++) {
+      const idx = crypto.randomInt(0, CODE_ALPHABET.length);
+      code += CODE_ALPHABET[idx];
+    }
+  } while (rooms.has(code));
+  return code;
+}
+
 function emptyBoard() {
   return Array.from({ length: SIZE }, () => Array(SIZE).fill(0));
 }
@@ -119,6 +133,9 @@ room = {
 */
 const rooms = new Map();
 
+// clientId -> { code, playerId }
+const byClient = new Map();
+
 function makeSnapshot(room) {
   const hasBoards = !!(room.boards?.A && room.boards?.B);
   const playerScoresArray = Array.from(room.players.values()).map(p => ({
@@ -153,11 +170,11 @@ function makeSnapshot(room) {
     },
     trivia: room.triviaPending
       ? {
-        nonce: room.triviaPending.nonce,
-        toTeam: room.triviaPending.toTeam,
-        allowedPlayerId: room.triviaPending.allowedPlayerId,
-        timeout: room.triviaPending.timeout,
-      }
+          nonce: room.triviaPending.nonce,
+          toTeam: room.triviaPending.toTeam,
+          allowedPlayerId: room.triviaPending.allowedPlayerId,
+          timeout: room.triviaPending.timeout,
+        }
       : null,
   };
 }
@@ -179,21 +196,18 @@ wss.on('connection', (ws) => {
     if (type === 'changeTeam') {
       const room = rooms.get(ws.roomCode);
       if (!room) return;
-
       const player = room.players.get(ws.id);
       if (!player) return;
-
-      // Cambiar equipo (si es A => B, si es B => A)
       player.team = player.team === 'A' ? 'B' : 'A';
-
-      // Notificar a todos
       broadcast(room, { type: 'roomUpdate', snapshot: makeSnapshot(room) });
       return;
     }
 
-
+    // ------- Crear sala -------
     if (type === 'createRoom') {
-      const code = (Math.random().toString(36).slice(2, 8)).toUpperCase();
+      const playerId = data.clientId || ws.id;
+      const code = generateCode(rooms, 5);
+
       const room = {
         code, state: 'lobby',
         players: new Map(), clients: new Set(),
@@ -211,27 +225,81 @@ wss.on('connection', (ws) => {
 
       room.clients.add(ws);
       ws.roomCode = code;
-      const player = { id: ws.id, name: data.name || 'Host', team: data.team === 'B' ? 'B' : 'A' };
-      room.players.set(ws.id, player);
-      room.scores.players.set(ws.id, 0);
+
+      const player = {
+        id: playerId,
+        name: data.name || 'Host',
+        team: data.team === 'B' ? 'B' : 'A',
+        disconnectedAt: null,
+      };
+      room.players.set(playerId, player);
+      room.scores.players.set(playerId, room.scores.players.get(playerId) ?? 0);
+
+      // El socket representa a ese playerId
+      ws.id = playerId;
+      byClient.set(playerId, { code, playerId });
 
       ws.send(JSON.stringify({ type: 'roomCreated', code }));
       broadcast(room, { type: 'roomUpdate', snapshot: makeSnapshot(room) });
       return;
     }
 
+    // ------- Unirse a sala (o reconectar) -------
     if (type === 'joinRoom') {
       const room = rooms.get(data.code);
       if (!room) { ws.send(JSON.stringify({ type: 'error', message: 'Sala no existe' })); return; }
+
+      const playerId = data.clientId || ws.id;
+      ws.id = playerId;
       room.clients.add(ws);
       ws.roomCode = room.code;
-      const player = { id: ws.id, name: data.name || 'Jugador', team: data.team === 'B' ? 'B' : 'A' };
-      room.players.set(ws.id, player);
-      room.scores.players.set(ws.id, 0);
+
+      let player = room.players.get(playerId);
+      if (player) {
+        if (data.name) player.name = data.name;
+        if (data.team === 'A' || data.team === 'B') player.team = data.team;
+        player.disconnectedAt = null;
+      } else {
+        player = {
+          id: playerId,
+          name: data.name || 'Jugador',
+          team: data.team === 'B' ? 'B' : 'A',
+          disconnectedAt: null,
+        };
+        room.players.set(playerId, player);
+      }
+
+      room.scores.players.set(playerId, room.scores.players.get(playerId) ?? 0);
+      byClient.set(playerId, { code: room.code, playerId });
       broadcast(room, { type: 'roomUpdate', snapshot: makeSnapshot(room) });
       return;
     }
 
+    // ------- Reanudar sesión -------
+    if (type === 'resume') {
+      const { code, clientId } = data;
+      const room = rooms.get(code);
+      if (!room) { ws.send(JSON.stringify({ type: 'toast', message: 'Sala no existe' })); return; }
+
+      ws.id = clientId;
+      ws.roomCode = code;
+
+      const player = room.players.get(clientId);
+      if (!player) {
+        ws.send(JSON.stringify({ type: 'toast', message: 'No hay jugador para reanudar' }));
+        return;
+      }
+
+      room.clients.add(ws);
+      player.disconnectedAt = null;
+      byClient.set(clientId, { code, playerId: clientId });
+
+      try { ws.send(JSON.stringify({ type: 'resumed' })); } catch {}
+      broadcast(room, { type: 'roomUpdate', snapshot: makeSnapshot(room) });
+      return;
+    }
+
+    // ------- Iniciar juego -------
     if (type === 'startGame') {
       const room = rooms.get(ws.roomCode); if (!room) return;
       room.boards.A = placeShipsRandomly();
@@ -245,12 +313,13 @@ wss.on('connection', (ws) => {
       room.sunk = { A: new Set(), B: new Set() };
       room.scores = {
         teams: { A: 0, B: 0 },
-        players: new Map(Array.from(room.players.keys()).map(id => [id, 0])),
+        players: new Map(Array.from(room.players.keys()).map(id => [id, room.scores.players.get(id) ?? 0])),
       };
       broadcast(room, { type: 'roomUpdate', snapshot: makeSnapshot(room) });
       return;
     }
 
+    // ------- Disparo -------
     if (type === 'fire') {
       const room = rooms.get(ws.roomCode); if (!room || room.state !== 'active') return;
       const shooter = room.players.get(ws.id); if (!shooter) return;
@@ -315,13 +384,13 @@ wss.on('connection', (ws) => {
 
         room.triviaPending = {
           toTeam: team,
-          allowedPlayerId: shooter.id,      // <— usa ID persistente del jugador
+          allowedPlayerId: shooter.id,
           nonce,
           answer: card.a,
           timeout: Date.now() + TRIVIA_TIME
         };
 
-        // Envía a todos, pero marca canAnswer solo para el jugador autorizado (por ID)
+        // Envía a todos, pero marca canAnswer solo para el jugador autorizado
         for (const client of room.clients) {
           try {
             if (client.readyState !== 1) continue; // 1 === OPEN
@@ -333,7 +402,7 @@ wss.on('connection', (ws) => {
               canAnswer,
               playerName: shooter.name,
               team: team,
-              allowedPlayerId: shooter.id      // <— opcional, útil al front
+              allowedPlayerId: shooter.id
             };
             client.send(JSON.stringify(payload));
           } catch { }
@@ -343,7 +412,7 @@ wss.on('connection', (ws) => {
           if (room.triviaPending && room.triviaPending.nonce === nonce) {
             room.triviaPending = null;
 
-            // 👉 cerrar la trivia por timeout en todos los clientes
+            // cerrar la trivia por timeout en todos los clientes
             broadcast(room, {
               type: 'triviaEnd',
               nonce,
@@ -359,28 +428,25 @@ wss.on('connection', (ws) => {
       return;
     }
 
+    // ------- Responder trivia -------
     if (type === 'answerTrivia') {
       const room = rooms.get(ws.roomCode); if (!room || !room.triviaPending) return;
       const { nonce, answerIndex } = data;
       const pending = room.triviaPending;
 
-      // Si el nonce no coincide, ignora
       if (pending.nonce !== nonce) return;
 
-      // Cierra trivia SIEMPRE en servidor antes de retornar
       const expired = Date.now() > pending.timeout;
       const team = pending.toTeam;
       let correct = false;
 
       if (!expired) {
-        // Solo el jugador autorizado puede responder
         if (ws.id !== pending.allowedPlayerId) {
           try { ws.send(JSON.stringify({ type: 'toast', message: '❌ No puedes responder. Le toca al jugador en turno.' })); } catch { }
           return;
         }
         correct = (answerIndex === pending.answer);
 
-        // Premio y puntaje
         if (correct) {
           const prize = randomChoice(WEAPONS);
           room.weapons[team].push(prize);
@@ -391,11 +457,9 @@ wss.on('connection', (ws) => {
           broadcast(room, { type: 'toast', message: '⏰ Respuesta incorrecta. Sin premio.' });
         }
       } else {
-        // Expirada
         broadcast(room, { type: 'toast', message: '⏳ La pregunta expiró.' });
       }
 
-      // 🔔 Notifica FIN de trivia a TODOS (siempre)
       const endPayload = {
         type: 'triviaEnd',
         nonce,
@@ -405,15 +469,11 @@ wss.on('connection', (ws) => {
         team
       };
 
-      // Limpia estado y emite
       room.triviaPending = null;
       broadcast(room, endPayload);
-
-      // Refresca snapshot
       broadcast(room, { type: 'roomUpdate', snapshot: makeSnapshot(room) });
       return;
     }
-
 
   });
 
@@ -421,10 +481,29 @@ wss.on('connection', (ws) => {
     if (!ws.roomCode) return;
     const room = rooms.get(ws.roomCode);
     if (!room) return;
+
+    // quita SOLO el socket de la lista de clientes activos
     room.clients.delete(ws);
-    room.players.delete(ws.id);
-    room.scores?.players?.delete(ws.id);
+
+    // marca al jugador como desconectado, NO lo borres aún
+    const player = room.players.get(ws.id);
+    if (player) {
+      player.disconnectedAt = Date.now();
+    }
+
     broadcast(room, { type: 'roomUpdate', snapshot: makeSnapshot(room) });
+
+    // Limpieza diferida: si en 10 min no volvió, entonces sí elimínalo
+    setTimeout(() => {
+      const still = rooms.get(ws.roomCode);
+      if (!still) return;
+      const p = still.players.get(ws.id);
+      if (p && p.disconnectedAt && Date.now() - p.disconnectedAt > 10 * 60 * 1000) {
+        still.players.delete(ws.id);
+        still.scores?.players?.delete(ws.id);
+        broadcast(still, { type: 'roomUpdate', snapshot: makeSnapshot(still) });
+      }
+    }, 10 * 60 * 1000);
   });
 });
 

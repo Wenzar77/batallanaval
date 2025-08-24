@@ -21,6 +21,23 @@ import type { SelectChangeEvent } from '@mui/material/Select';
 import CloseIcon from '@mui/icons-material/Close';
 import IconButton from '@mui/material/IconButton';
 
+// arriba del componente (fuera de App)
+const LS_KEYS = {
+  clientId: 'arena.clientId',
+  settings: 'arena.settings', // code, name, team, isHost, mode
+} as const;
+
+function getOrCreateClientId() {
+  let id = localStorage.getItem(LS_KEYS.clientId);
+  if (!id) {
+    // usa crypto.randomUUID si está disponible
+    id = (crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2));
+    localStorage.setItem(LS_KEYS.clientId, id);
+  }
+  return id;
+}
+
+
 // ---- Tipos y constantes ----
 type Team = 'A' | 'B';
 const SIZE = 20;
@@ -114,6 +131,31 @@ export default function App() {
   // justo con los demás useState
   const [mode, setMode] = useState<'crear' | 'unirme'>('crear');
 
+  // dentro de App()  
+  const clientId = useMemo(() => getOrCreateClientId(), []);
+
+  // Cargar al montar
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(LS_KEYS.settings);
+      if (raw) {
+        const s = JSON.parse(raw);
+        if (typeof s.name === 'string') setName(s.name);
+        if (s.team === 'A' || s.team === 'B') setTeam(s.team);
+        if (typeof s.code === 'string') setCode(s.code);
+        if (typeof s.isHost === 'boolean') setIsHost(s.isHost);
+        if (s.mode === 'crear' || s.mode === 'unirme') setMode(s.mode);
+      }
+    } catch { /* noop */ }
+  }, []);
+
+  // Guardar en cambios relevantes
+  useEffect(() => {
+    const persist = { name, team, code, isHost, mode };
+    localStorage.setItem(LS_KEYS.settings, JSON.stringify(persist));
+  }, [name, team, code, isHost, mode]);
+
+
 
   const handleTeamChange = (e: SelectChangeEvent) => {
     setTeam(e.target.value as Team);
@@ -143,43 +185,106 @@ export default function App() {
   const safeTeamName = names[safeTeamKey] ?? safeTeamKey;
 
   // ---- Conexión WS ----
+  // Reemplaza tu useEffect de WS por esta versión con reconexión
   useEffect(() => {
     const wsUrl = (import.meta.env.VITE_WS_URL as string) || 'ws://localhost:3000/ws';
-    console.log('WS URL ->', wsUrl);
+    let socket: WebSocket | null = null;
+    let retry = 0;
+    let closedByUs = false;
 
-    const socket = new WebSocket(wsUrl);
-    socket.onopen = () => setConnected(true);
-    socket.onclose = () => setConnected(false);
-    socket.onmessage = (ev) => {
-      const data = JSON.parse(ev.data);
-      if (data.type === 'roomCreated') setCode(data.code);
-      if (data.type === 'roomUpdate') {
-        setSnapshot(data.snapshot);
+    const connect = () => {
+      socket = new WebSocket(wsUrl);
 
-        // 👇 Si el servidor dice que NO hay trivia, asegúrate de cerrar el modal
-        if (!data.snapshot.trivia) {
-          setTrivia(null);
-        } else {
-          // (opcional) si hay trivia activa y el nonce cambió, reemplaza
-          setTrivia((curr) => {
-            const s = data.snapshot.trivia;
-            if (!curr || curr.nonce !== s.nonce) return curr; // o puedes decidir sincronizar
-            return curr; // deja igual si coincide
-          });
+      socket.onopen = () => {
+        setWs(socket);
+        setConnected(true);
+        retry = 0;
+
+        // Intento de reanudar si hay sala conocida
+        const stored = localStorage.getItem(LS_KEYS.settings);
+        if (stored) {
+          try {
+            const { code: lastCode, name: lastName, team: lastTeam, isHost: wasHost } = JSON.parse(stored);
+            if (lastCode && lastName && (lastTeam === 'A' || lastTeam === 'B')) {
+              // 1) Intento 'resume'
+              const msgResume = {
+                type: 'resume',
+                code: lastCode,
+                clientId,        // 👈 MUY IMPORTANTE
+              };
+              socket!.send(JSON.stringify(msgResume));
+
+              // 2) Fallback: si en breve no llega update, intenta unirse
+              // (muchos servers mandan roomUpdate al hacer resume exitoso)
+              setTimeout(() => {
+                if (!snapshot) {
+                  const msgJoin = {
+                    type: 'joinRoom',
+                    code: lastCode,
+                    name: lastName,
+                    team: lastTeam as Team,
+                    clientId,
+                  };
+                  socket!.send(JSON.stringify(msgJoin));
+                  setIsHost(!!wasHost);
+                }
+              }, 600);
+            }
+          } catch { /* noop */ }
         }
-      }
+      };
 
-      if (data.type === 'toast') setToast(data.message);
-      if (data.type === 'trivia') { console.log('[TRIVIA RX]', data); setTrivia(data); }
-      if (data.type === 'triviaEnd') {
-        //setTrivia((curr) => (curr && curr.nonce === data.nonce ? null : curr));        
-        setTrivia(null);
-      }
+      socket.onmessage = (ev) => {
+        const data = JSON.parse(ev.data);
+
+        if (data.type === 'roomCreated') {
+          setCode(data.code);
+        }
+
+        if (data.type === 'roomUpdate') {
+          setSnapshot(data.snapshot);
+          // cierra modal de trivia si el server dice que no hay
+          if (!data.snapshot.trivia) setTrivia(null);
+        }
+
+        if (data.type === 'toast') setToast(data.message);
+
+        if (data.type === 'trivia') setTrivia(data);
+
+        if (data.type === 'triviaEnd') setTrivia(null);
+
+        // (opcional) el server podría enviar 'resumed' como confirmación
+        if (data.type === 'resumed') {
+          // fuerza pedir snapshot si quieres
+          // socket!.send(JSON.stringify({ type: 'getSnapshot' }));
+        }
+      };
+
+      socket.onclose = () => {
+        setConnected(false);
+        setWs(null);
+        if (!closedByUs) {
+          // backoff exponencial con tope
+          const delay = Math.min(1000 * 2 ** retry, 8000);
+          retry += 1;
+          setTimeout(connect, delay);
+        }
+      };
+
+      socket.onerror = () => {
+        // deja que onclose dispare el backoff
+      };
     };
 
-    setWs(socket);
-    return () => socket.close();
-  }, []);
+    connect();
+
+    return () => {
+      closedByUs = true;
+      try { socket?.close(); } catch { /* noop */ }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId]); // solo depende del clientId estable
+
 
   useEffect(() => {
     if (!trivia) return;
@@ -208,13 +313,13 @@ export default function App() {
   const createRoom = () => {
     if (!ws) return;
     setIsHost(true);
-    ws.send(JSON.stringify({ type: 'createRoom', name: name || 'Host', team }));
+    ws.send(JSON.stringify({ type: 'createRoom', name: name || 'Host', team, clientId }));
   };
 
   const joinRoom = () => {
     if (!ws || !code) return;
     setIsHost(false);
-    ws.send(JSON.stringify({ type: 'joinRoom', code, name: name || 'Jugador', team }));
+    ws.send(JSON.stringify({ type: 'joinRoom', code, name: name || 'Jugador', team, clientId }));
   };
 
   const startGame = () => ws && ws.send(JSON.stringify({ type: 'startGame' }));
