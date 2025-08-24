@@ -35,8 +35,7 @@ const wss = new WebSocketServer({ server, path: '/ws' });
 const uuid = () => crypto.randomUUID();
 const randomChoice = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
-// Código de sala sin I/O/0/1 para evitar confusiones
-const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // sin I/O/0/1
 function generateCode(rooms, length = 5) {
   let code = '';
   do {
@@ -132,8 +131,7 @@ room = {
 }
 */
 const rooms = new Map();
-
-// clientId -> { code, playerId }
+// clientId -> { code, playerId } (opcional; útil para debugging)
 const byClient = new Map();
 
 function makeSnapshot(room) {
@@ -235,7 +233,6 @@ wss.on('connection', (ws) => {
       room.players.set(playerId, player);
       room.scores.players.set(playerId, room.scores.players.get(playerId) ?? 0);
 
-      // El socket representa a ese playerId
       ws.id = playerId;
       byClient.set(playerId, { code, playerId });
 
@@ -390,7 +387,7 @@ wss.on('connection', (ws) => {
           timeout: Date.now() + TRIVIA_TIME
         };
 
-        // Envía a todos, pero marca canAnswer solo para el jugador autorizado
+        // Envía a todos, pero solo el jugador en turno puede responder
         for (const client of room.clients) {
           try {
             if (client.readyState !== 1) continue; // 1 === OPEN
@@ -411,14 +408,7 @@ wss.on('connection', (ws) => {
         setTimeout(() => {
           if (room.triviaPending && room.triviaPending.nonce === nonce) {
             room.triviaPending = null;
-
-            // cerrar la trivia por timeout en todos los clientes
-            broadcast(room, {
-              type: 'triviaEnd',
-              nonce,
-              reason: 'timeout'
-            });
-
+            broadcast(room, { type: 'triviaEnd', nonce, reason: 'timeout' });
             broadcast(room, { type: 'roomUpdate', snapshot: makeSnapshot(room) });
           }
         }, TRIVIA_TIME + 1000);
@@ -482,10 +472,9 @@ wss.on('connection', (ws) => {
     const room = rooms.get(ws.roomCode);
     if (!room) return;
 
-    // quita SOLO el socket de la lista de clientes activos
     room.clients.delete(ws);
 
-    // marca al jugador como desconectado, NO lo borres aún
+    // NO borrar de inmediato: permitir reanudar
     const player = room.players.get(ws.id);
     if (player) {
       player.disconnectedAt = Date.now();
@@ -493,7 +482,7 @@ wss.on('connection', (ws) => {
 
     broadcast(room, { type: 'roomUpdate', snapshot: makeSnapshot(room) });
 
-    // Limpieza diferida: si en 10 min no volvió, entonces sí elimínalo
+    // Limpieza diferida a los 10 minutos si no volvió
     setTimeout(() => {
       const still = rooms.get(ws.roomCode);
       if (!still) return;

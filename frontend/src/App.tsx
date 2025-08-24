@@ -14,33 +14,40 @@ import WhatshotIcon from '@mui/icons-material/Whatshot';
 import AddchartIcon from '@mui/icons-material/Addchart';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 
-// arriba de App.tsx
 import ScoreScreen from './components/ScoreScreen';
 import { FormControl, InputLabel, Select, MenuItem } from '@mui/material';
 import type { SelectChangeEvent } from '@mui/material/Select';
 import CloseIcon from '@mui/icons-material/Close';
 import IconButton from '@mui/material/IconButton';
 
-// arriba del componente (fuera de App)
-const LS_KEYS = {
-  clientId: 'arena.clientId',
-  settings: 'arena.settings', // code, name, team, isHost, mode
-} as const;
-
-function getOrCreateClientId() {
-  let id = localStorage.getItem(LS_KEYS.clientId);
-  if (!id) {
-    // usa crypto.randomUUID si está disponible
-    id = (crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2));
-    localStorage.setItem(LS_KEYS.clientId, id);
-  }
-  return id;
-}
-
-
 // ---- Tipos y constantes ----
 type Team = 'A' | 'B';
 const SIZE = 20;
+
+// QS param keys
+const QS_CODE = 'code';
+const QS_TOKEN = 't';
+
+// Utilidades de URL
+const readQS = () => new URL(window.location.href).searchParams;
+const setQS = (updates: Record<string, string | null | undefined>) => {
+  const url = new URL(window.location.href);
+  for (const [k, v] of Object.entries(updates)) {
+    if (v === null || v === undefined || v === '') url.searchParams.delete(k);
+    else url.searchParams.set(k, String(v));
+  }
+  window.history.replaceState({}, '', url.toString());
+};
+const ensureTokenInURL = (): string => {
+  const url = new URL(window.location.href);
+  let t = url.searchParams.get(QS_TOKEN);
+  if (!t) {
+    t = (crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2));
+    url.searchParams.set(QS_TOKEN, t);
+    window.history.replaceState({}, '', url.toString());
+  }
+  return t;
+};
 
 type Snapshot = {
   code: string;
@@ -51,27 +58,32 @@ type Snapshot = {
   weapons: Record<Team, string[]>;
   shipsRemaining: Record<Team, number>;
   gridSize: number;
-  turnPlayerId?: string | null;   // 👈 NEW
+  turnPlayerId?: string | null;
   history: { A: string[]; B: string[]; Amiss: string[]; Bmiss: string[] };
   scores?: {
     teams: Record<Team, number>;
     players: { id: string; name: string; team: Team; points: number }[];
   };
+  trivia?: {
+    nonce: string;
+    toTeam: Team;
+    allowedPlayerId: string;
+    timeout: number;
+  } | null;
 };
 
 // Fallback de nombres e iconos (por si el server aún no los envía)
 const DEFAULT_TEAM_NAMES: Record<Team, string> = { A: 'Jaguares', B: 'Guacamayas' };
 const TEAM_ICONS: Record<Team, string> = { A: '🐆', B: '🦜' };
 
-// Trivia message
+// Trivia message para el modal
 type TriviaMsg = {
   card: { q: string; opts: string[] };
   nonce: string;
   canAnswer: boolean;
-  playerName?: string;  // opcional
-  team?: Team;          // opcional
+  playerName?: string;
+  team?: Team;
 };
-
 
 // ---- Render de celda / tablero ----
 function Cell({ state }: { state: 'unknown' | 'hit' | 'miss' }) {
@@ -113,13 +125,16 @@ function GridBoard({
 // ---- Detección de pantalla de marcador ----
 const isScreen = typeof window !== 'undefined' && window.location.pathname.endsWith('/screen');
 
-
-
 // ---- App principal ----
 export default function App() {
+  const initialQS = useMemo(() => readQS(), []);
+  const initialCode = (initialQS.get(QS_CODE) ?? '').toUpperCase();
+  const initialToken = initialQS.get(QS_TOKEN) ?? '';
+
   const [ws, setWs] = useState<WebSocket | null>(null);
   const [connected, setConnected] = useState(false);
-  const [code, setCode] = useState('');
+  const [code, setCode] = useState<string>(initialCode);
+  const [clientId, setClientId] = useState<string>(initialToken);
   const [name, setName] = useState('');
   const [team, setTeam] = useState<Team>('A');
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -128,34 +143,7 @@ export default function App() {
   const [trivia, setTrivia] = useState<TriviaMsg | null>(null);
   const [weaponToUse, setWeaponToUse] = useState<string | null>(null);
   const [doubleShotPending, setDoubleShotPending] = useState<number>(0);
-  // justo con los demás useState
   const [mode, setMode] = useState<'crear' | 'unirme'>('crear');
-
-  // dentro de App()  
-  const clientId = useMemo(() => getOrCreateClientId(), []);
-
-  // Cargar al montar
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(LS_KEYS.settings);
-      if (raw) {
-        const s = JSON.parse(raw);
-        if (typeof s.name === 'string') setName(s.name);
-        if (s.team === 'A' || s.team === 'B') setTeam(s.team);
-        if (typeof s.code === 'string') setCode(s.code);
-        if (typeof s.isHost === 'boolean') setIsHost(s.isHost);
-        if (s.mode === 'crear' || s.mode === 'unirme') setMode(s.mode);
-      }
-    } catch { /* noop */ }
-  }, []);
-
-  // Guardar en cambios relevantes
-  useEffect(() => {
-    const persist = { name, team, code, isHost, mode };
-    localStorage.setItem(LS_KEYS.settings, JSON.stringify(persist));
-  }, [name, team, code, isHost, mode]);
-
-
 
   const handleTeamChange = (e: SelectChangeEvent) => {
     setTeam(e.target.value as Team);
@@ -163,7 +151,6 @@ export default function App() {
 
   const closeTrivia = () => setTrivia(null);
 
-  // justo después de:
   const teamNames = snapshot?.teamNames ?? DEFAULT_TEAM_NAMES;
   const enemyTeam: Team = team === 'A' ? 'B' : 'A';
 
@@ -172,25 +159,23 @@ export default function App() {
     : undefined;
   const turnPlayerName = turnPlayer?.name ?? null;
 
-  // nombre del jugador en turno según snapshot (por si trivia no trae playerName)
   const turnPlayerNameFromSnapshot =
     snapshot?.turnPlayerId
       ? snapshot.players.find(p => p.id === snapshot.turnPlayerId)?.name ?? null
       : null;
 
-  // fallbacks robustos
   const safePlayerName = trivia?.playerName ?? turnPlayerNameFromSnapshot ?? 'el jugador en turno';
   const safeTeamKey = (trivia?.team ?? snapshot?.turnTeam ?? 'A') as Team;
   const names = snapshot?.teamNames ?? DEFAULT_TEAM_NAMES;
   const safeTeamName = names[safeTeamKey] ?? safeTeamKey;
 
-  // ---- Conexión WS ----
-  // Reemplaza tu useEffect de WS por esta versión con reconexión
+  // ---- Conexión WS con reanudación por URL (sin storage) ----
   useEffect(() => {
     const wsUrl = (import.meta.env.VITE_WS_URL as string) || 'ws://localhost:3000/ws';
     let socket: WebSocket | null = null;
     let retry = 0;
     let closedByUs = false;
+    let gotFirstSnapshot = false;
 
     const connect = () => {
       socket = new WebSocket(wsUrl);
@@ -200,37 +185,36 @@ export default function App() {
         setConnected(true);
         retry = 0;
 
-        // Intento de reanudar si hay sala conocida
-        const stored = localStorage.getItem(LS_KEYS.settings);
-        if (stored) {
-          try {
-            const { code: lastCode, name: lastName, team: lastTeam, isHost: wasHost } = JSON.parse(stored);
-            if (lastCode && lastName && (lastTeam === 'A' || lastTeam === 'B')) {
-              // 1) Intento 'resume'
-              const msgResume = {
-                type: 'resume',
-                code: lastCode,
-                clientId,        // 👈 MUY IMPORTANTE
-              };
-              socket!.send(JSON.stringify(msgResume));
+        // Si hay code+token en URL ⇒ intenta resume inmediatamente
+        const qs = readQS();
+        let urlCode = (qs.get(QS_CODE) ?? '').toUpperCase();
+        let urlToken = qs.get(QS_TOKEN) ?? '';
 
-              // 2) Fallback: si en breve no llega update, intenta unirse
-              // (muchos servers mandan roomUpdate al hacer resume exitoso)
-              setTimeout(() => {
-                if (!snapshot) {
-                  const msgJoin = {
-                    type: 'joinRoom',
-                    code: lastCode,
-                    name: lastName,
-                    team: lastTeam as Team,
-                    clientId,
-                  };
-                  socket!.send(JSON.stringify(msgJoin));
-                  setIsHost(!!wasHost);
-                }
-              }, 600);
+        // Si hay sala conocida en estado y no está en URL, súbela a la URL
+        if (!urlCode && code) { urlCode = code; setQS({ [QS_CODE]: code }); }
+        // Asegura token en URL si no hay
+        if (!urlToken) {
+          urlToken = ensureTokenInURL();
+          setClientId(urlToken);
+        } else if (!clientId) {
+          setClientId(urlToken);
+        }
+
+        if (urlCode && urlToken) {
+          socket!.send(JSON.stringify({ type: 'resume', code: urlCode, clientId: urlToken }));
+          // Fallback: si no llega snapshot pronto, intenta join con datos mínimos
+          setTimeout(() => {
+            if (!socket || socket.readyState !== 1) return;
+            if (!gotFirstSnapshot) {
+              socket.send(JSON.stringify({
+                type: 'joinRoom',
+                code: urlCode,
+                name: name || 'Jugador',
+                team,
+                clientId: urlToken
+              }));
             }
-          } catch { /* noop */ }
+          }, 600);
         }
       };
 
@@ -238,33 +222,29 @@ export default function App() {
         const data = JSON.parse(ev.data);
 
         if (data.type === 'roomCreated') {
-          setCode(data.code);
+          const newCode: string = data.code;
+          setCode(newCode);
+          // asegura token y code en URL
+          const token = clientId || ensureTokenInURL();
+          if (!clientId) setClientId(token);
+          setQS({ [QS_CODE]: newCode, [QS_TOKEN]: token });
         }
 
         if (data.type === 'roomUpdate') {
+          gotFirstSnapshot = true;
           setSnapshot(data.snapshot);
-          // cierra modal de trivia si el server dice que no hay
           if (!data.snapshot.trivia) setTrivia(null);
         }
 
         if (data.type === 'toast') setToast(data.message);
-
         if (data.type === 'trivia') setTrivia(data);
-
         if (data.type === 'triviaEnd') setTrivia(null);
-
-        // (opcional) el server podría enviar 'resumed' como confirmación
-        if (data.type === 'resumed') {
-          // fuerza pedir snapshot si quieres
-          // socket!.send(JSON.stringify({ type: 'getSnapshot' }));
-        }
       };
 
       socket.onclose = () => {
         setConnected(false);
         setWs(null);
         if (!closedByUs) {
-          // backoff exponencial con tope
           const delay = Math.min(1000 * 2 ** retry, 8000);
           retry += 1;
           setTimeout(connect, delay);
@@ -272,7 +252,7 @@ export default function App() {
       };
 
       socket.onerror = () => {
-        // deja que onclose dispare el backoff
+        // deja que onclose maneje el backoff
       };
     };
 
@@ -280,11 +260,10 @@ export default function App() {
 
     return () => {
       closedByUs = true;
-      try { socket?.close(); } catch { /* noop */ }
+      try { socket?.close(); } catch {}
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientId]); // solo depende del clientId estable
-
+  }, []); // una sola vez
 
   useEffect(() => {
     if (!trivia) return;
@@ -292,7 +271,6 @@ export default function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [trivia]);
-
 
   // ---- Derivados de historia ----
   const hitsEnemy = useMemo(() => {
@@ -313,13 +291,19 @@ export default function App() {
   const createRoom = () => {
     if (!ws) return;
     setIsHost(true);
-    ws.send(JSON.stringify({ type: 'createRoom', name: name || 'Host', team, clientId }));
+    const token = clientId || ensureTokenInURL();
+    if (!clientId) setClientId(token);
+    ws.send(JSON.stringify({ type: 'createRoom', name: name || 'Host', team, clientId: token }));
   };
 
   const joinRoom = () => {
     if (!ws || !code) return;
     setIsHost(false);
-    ws.send(JSON.stringify({ type: 'joinRoom', code, name: name || 'Jugador', team, clientId }));
+    const token = clientId || ensureTokenInURL();
+    if (!clientId) setClientId(token);
+    // asegura code y token en URL
+    setQS({ [QS_CODE]: code, [QS_TOKEN]: token });
+    ws.send(JSON.stringify({ type: 'joinRoom', code, name: name || 'Jugador', team, clientId: token }));
   };
 
   const startGame = () => ws && ws.send(JSON.stringify({ type: 'startGame' }));
@@ -346,12 +330,10 @@ export default function App() {
   };
 
   const myWeapons = snapshot?.weapons?.[team] || [];
-
   const weaponCounts = myWeapons.reduce<Record<string, number>>((acc, w) => {
     acc[w] = (acc[w] || 0) + 1;
     return acc;
   }, {});
-
 
   // ---- Pantalla de marcador dedicada ----
   if (isScreen && snapshot) {
@@ -360,7 +342,7 @@ export default function App() {
         snapshot={snapshot}
         teamNames={teamNames}
         teamIcons={TEAM_ICONS}
-        activePlayerId={snapshot.turnPlayerId ?? null} // 👈 clave
+        activePlayerId={snapshot.turnPlayerId ?? null}
       />
     );
   }
@@ -405,6 +387,7 @@ export default function App() {
               />
             </Grid>
           </Grid>
+
           <Grid container spacing={3} alignItems="center">
             <Grid size={{ xs: 12, md: 3 }}>
               <FormControl fullWidth>
@@ -508,7 +491,6 @@ export default function App() {
               )}
             </Grid>
           </Grid>
-
         </Paper>
 
         {snapshot && (
@@ -580,7 +562,7 @@ export default function App() {
                       clickable
                       color={weaponToUse === w ? 'success' : 'primary'}
                       onClick={() => setWeaponToUse(w)}
-                      label={`${w} x${count}`}   // 👈 muestra cantidad
+                      label={`${w} x${count}`}
                       icon={
                         w === 'radar' ? (
                           <RadarIcon />
@@ -594,7 +576,6 @@ export default function App() {
                       }
                     />
                   ))}
-
                 </Stack>
                 {weaponToUse && (
                   <Alert sx={{ mt: 2 }} severity="info">
@@ -624,11 +605,7 @@ export default function App() {
                           <Box sx={{ pl: 1, pr: 1 }} />
                         </Badge>
                         <Typography sx={{ flexGrow: 1 }}>{p.name}</Typography>
-                        <Chip
-                          size="small"
-                          color="success"
-                          label={`${playerScore} pts`}
-                        />
+                        <Chip size="small" color="success" label={`${playerScore} pts`} />
                       </Stack>
                     );
                   })}
@@ -670,7 +647,6 @@ export default function App() {
         </Box>
       )}
 
-
       {/* Trivia Dialog */}
       {trivia && (
         <Box
@@ -684,15 +660,13 @@ export default function App() {
             p: 2,
             zIndex: 9999
           }}
-          // clic en el fondo cierra
           onClick={closeTrivia}
         >
           <Paper
-            onClick={(e) => e.stopPropagation()} // no cerrar si se hace clic dentro
+            onClick={(e) => e.stopPropagation()}
             sx={{ p: 3, maxWidth: 600, width: '100%', position: 'relative' }}
             elevation={6}
           >
-            {/* header con botón X */}
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
               <Typography variant="h6">Pregunta sorpresa</Typography>
               <IconButton aria-label="Cerrar" onClick={closeTrivia} size="small">
@@ -700,7 +674,6 @@ export default function App() {
               </IconButton>
             </Box>
 
-            {/* Indica claramente quién debe responder */}
             <Alert severity={trivia.canAnswer ? 'success' : 'warning'} sx={{ mb: 2 }}>
               {trivia.canAnswer
                 ? '¡Te toca responder!'
@@ -722,7 +695,6 @@ export default function App() {
               ))}
             </Stack>
 
-            {/* acciones abajo: Cerrar siempre disponible */}
             <Stack direction="row" justifyContent="flex-end" spacing={1} sx={{ mt: 2 }}>
               <Button onClick={closeTrivia}>Cerrar</Button>
             </Stack>
@@ -743,7 +715,6 @@ export default function App() {
           </Alert>
         )}
       </Snackbar>
-
     </>
   );
 }
