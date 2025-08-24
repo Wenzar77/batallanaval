@@ -5,7 +5,10 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   AppBar, Toolbar, Typography, Container, Paper, Box, Button, TextField, Chip,
   Stack, Snackbar, Alert, Divider, Badge, Avatar, Grid, Switch, FormControlLabel,
+  LinearProgress, Tooltip
 } from '@mui/material';
+
+
 import SportsEsportsIcon from '@mui/icons-material/SportsEsports';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import GroupAddIcon from '@mui/icons-material/GroupAdd';
@@ -19,6 +22,76 @@ import { FormControl, InputLabel, Select, MenuItem } from '@mui/material';
 import type { SelectChangeEvent } from '@mui/material/Select';
 import CloseIcon from '@mui/icons-material/Close';
 import IconButton from '@mui/material/IconButton';
+
+
+function FleetPanel({
+  teamNames,
+  shipsRemaining,
+}: {
+  teamNames: Record<Team, string>;
+  shipsRemaining: Record<Team, number>;
+}) {
+  const remA = shipsRemaining.A;
+  const remB = shipsRemaining.B;
+  const sunkA = FLEET_TOTAL_SHIPS - remA; // hundidos al equipo A
+  const sunkB = FLEET_TOTAL_SHIPS - remB; // hundidos al equipo B
+
+  return (
+    <>
+      <Typography variant="h6" gutterBottom>
+        Flota por equipo
+      </Typography>
+
+      {/* Equipo A */}
+      <Stack spacing={0.5} sx={{ mb: 1.5 }}>
+        <Stack direction="row" alignItems="center" spacing={1}>
+          <Avatar sx={{ width: 24, height: 24, fontSize: 14 }}>{TEAM_ICONS.A}</Avatar>
+          <Typography variant="subtitle2" sx={{ flexGrow: 1 }}>
+            <b>{teamNames.A}</b> — Restantes: {remA}/{FLEET_TOTAL_SHIPS} · Hundidos: {sunkA}
+          </Typography>
+        </Stack>
+        <LinearProgress variant="determinate" value={(remA / FLEET_TOTAL_SHIPS) * 100} />
+      </Stack>
+
+      {/* Equipo B */}
+      <Stack spacing={0.5} sx={{ mb: 1.5 }}>
+        <Stack direction="row" alignItems="center" spacing={1}>
+          <Avatar sx={{ width: 24, height: 24, fontSize: 14 }}>{TEAM_ICONS.B}</Avatar>
+          <Typography variant="subtitle2" sx={{ flexGrow: 1 }}>
+            <b>{teamNames.B}</b> — Restantes: {remB}/{FLEET_TOTAL_SHIPS} · Hundidos: {sunkB}
+          </Typography>
+        </Stack>
+        <LinearProgress variant="determinate" value={(remB / FLEET_TOTAL_SHIPS) * 100} />
+      </Stack>
+
+      <Divider sx={{ my: 1.5 }} />
+
+      <Typography variant="subtitle2" gutterBottom>
+        Composición de flota (por equipo)
+      </Typography>
+      <Stack direction="row" spacing={1} flexWrap="wrap">
+        {FLEET_INFO.map((f) => (
+          <Chip
+            key={f.key}
+            label={`${f.emoji} ${f.label} (${f.size}) ×${f.count}`}
+            variant="outlined"
+          />
+        ))}
+      </Stack>
+    </>
+  );
+}
+
+
+// --- Flota estándar y nombres amigables ---
+const FLEET_INFO = [
+  { key: 'carrier', label: 'Portaviones', size: 5, count: 1, emoji: '🛳️' },
+  { key: 'battleship', label: 'Acorazado', size: 4, count: 1, emoji: '🚢' },
+  { key: 'cruiser', label: 'Crucero', size: 3, count: 2, emoji: '🛥️' },
+  { key: 'destroyer', label: 'Destructor', size: 2, count: 3, emoji: '🚤' },
+];
+const FLEET_TOTAL_SHIPS = FLEET_INFO.reduce((s, f) => s + f.count, 0); // 7 barcos por equipo
+
 
 // ---- Tipos y constantes ----
 type Team = 'A' | 'B';
@@ -550,17 +623,24 @@ export default function App() {
                       {TEAM_ICONS[enemyTeam]}
                     </Avatar>
                   </Typography>
-                  <Chip
-                    label={
-                      snapshot.state === 'active'
-                        ? myTurn
-                          ? 'Tu turno'
-                          : 'Turno rival'
-                        : snapshot.state
-                    }
-                    color={myTurn ? 'success' : 'default'}
-                  />
+
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <Chip
+                      label={
+                        snapshot.state === 'active'
+                          ? myTurn ? 'Tu turno' : 'Turno rival'
+                          : snapshot.state
+                      }
+                      color={myTurn ? 'success' : 'default'}
+                    />
+                    <Chip
+                      variant="outlined"
+                      color="primary"
+                      label={`Objetivo: ${teamNames[enemyTeam]} · ${snapshot.shipsRemaining[enemyTeam]}/${FLEET_TOTAL_SHIPS}`}
+                    />
+                  </Stack>
                 </Stack>
+
                 <Box sx={{ mt: 2, overflow: 'auto' }}>
                   <GridBoard
                     size={SIZE}
@@ -589,9 +669,12 @@ export default function App() {
                   />
                 </Typography>
 
-                <Typography variant="subtitle1" sx={{ mt: 1 }}>
-                  Barcos restantes — A: {snapshot.shipsRemaining.A} | B: {snapshot.shipsRemaining.B}
-                </Typography>
+                <Divider sx={{ my: 1.5 }} />
+
+                <FleetPanel
+                  teamNames={teamNames}
+                  shipsRemaining={snapshot.shipsRemaining}
+                />
               </Paper>
 
               <Paper sx={{ p: 2, mb: 2 }}>
