@@ -8,6 +8,7 @@ import {
   LinearProgress
 } from '@mui/material';
 
+import PowerSettingsNewIcon from '@mui/icons-material/PowerSettingsNew';
 import SportsEsportsIcon from '@mui/icons-material/SportsEsports';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import GroupAddIcon from '@mui/icons-material/GroupAdd';
@@ -550,8 +551,14 @@ export default function App() {
             Abrir Pantalla
           </Button>
           {snapshot?.state === 'active' && (
-            <Button onClick={leaveGame} color="error" variant="outlined" sx={{ ml: 1 }}>
-              Desconectarme
+            <Button
+              onClick={leaveGame}
+              color="error"
+              variant="contained"
+              startIcon={<PowerSettingsNewIcon />}   // 👈 aquí va el ícono
+              sx={{ ml: 1, bgcolor: 'white', color: 'error.main', fontWeight: 'bold' }}
+            >
+              DESCONECTAR
             </Button>
           )}
         </Toolbar>
@@ -568,9 +575,6 @@ export default function App() {
               </Typography>
               <Stack direction="row" spacing={1}>
                 <Chip color="success" label="Partida en curso" />
-                <Button variant="outlined" color="error" onClick={leaveGame}>
-                  Desconectarme
-                </Button>
               </Stack>
             </Stack>
           </Paper>
@@ -720,7 +724,7 @@ export default function App() {
                     <Chip
                       label={
                         snapshot.state === 'active'
-                          ? ( (snapshot.turnTeam === team) ? 'Tu turno' : 'Turno rival' )
+                          ? ((snapshot.turnTeam === team) ? 'Tu turno' : 'Turno rival')
                           : snapshot.state
                       }
                       color={(snapshot.state === 'active' && snapshot.turnTeam === team) ? 'success' : 'default'}
