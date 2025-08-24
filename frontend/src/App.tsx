@@ -9,7 +9,6 @@ import {
 } from '@mui/material';
 
 import PowerSettingsNewIcon from '@mui/icons-material/PowerSettingsNew';
-import SportsEsportsIcon from '@mui/icons-material/SportsEsports';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import GroupAddIcon from '@mui/icons-material/GroupAdd';
 import RadarIcon from '@mui/icons-material/Radar';
@@ -18,6 +17,7 @@ import AddchartIcon from '@mui/icons-material/Addchart';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import CloseIcon from '@mui/icons-material/Close';
 import IconButton from '@mui/material/IconButton';
+import TvIcon from '@mui/icons-material/Tv';
 
 import ScoreScreen from './components/ScoreScreen';
 import { FormControl, InputLabel, Select, MenuItem } from '@mui/material';
@@ -52,6 +52,15 @@ const ensureTokenInURL = (): string => {
   }
   return t;
 };
+
+const buildScreenUrl = (roomCode: string): string => {
+  // Asegura que exista token y devuélvelo
+  const token = ensureTokenInURL();
+  const base = `${window.location.origin}/screen`;
+  const params = new URLSearchParams({ [QS_CODE]: roomCode, [QS_TOKEN]: token });
+  return `${base}?${params.toString()}`;
+};
+
 
 // --- Flota estándar y nombres amigables ---
 const FLEET_INFO = [
@@ -530,7 +539,6 @@ export default function App() {
     <>
       <AppBar position="sticky">
         <Toolbar>
-          <SportsEsportsIcon sx={{ mr: 1 }} />
           <Typography
             variant="h6"
             sx={{ flexGrow: 1, display: 'flex', alignItems: 'center', gap: 1 }}
@@ -547,8 +555,30 @@ export default function App() {
             label={connected ? 'WS conectado' : 'WS desconectado'}
             sx={{ mr: 1 }}
           />
-          <Button onClick={() => window.open('/screen', '_blank')} variant="outlined">
-            Abrir Pantalla
+
+          {/*Boton ver TABLERO*/}
+          <Button
+            onClick={() => {
+              const roomCode = snapshot?.code || code;   // usa el de la sala activa
+              if (!roomCode) {
+                setToast('No hay sala activa para abrir el tablero.');
+                return;
+              }
+              const url = buildScreenUrl(roomCode);
+              window.open(url, '_blank', 'noopener');
+            }}
+            variant="contained"
+            startIcon={<TvIcon />}
+            disabled={!snapshot?.code && !code}          // opcional: deshabilita si no hay sala
+            sx={{
+              ml: 1,
+              color: 'primary.main',
+              bgcolor: 'white',
+              fontWeight: 'bold',
+              '&:hover': { bgcolor: 'grey.100' }
+            }}
+          >
+            TABLERO
           </Button>
           {snapshot?.state === 'active' && (
             <Button
