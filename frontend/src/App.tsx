@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   AppBar, Toolbar, Typography, Container, Paper, Box, Button, TextField, Chip,
-  Stack, Snackbar, Alert, Divider, Badge, Avatar
+  Stack, Snackbar, Alert, Divider, Badge, Avatar, Grid, Switch, FormControlLabel,
 } from '@mui/material';
 import SportsEsportsIcon from '@mui/icons-material/SportsEsports';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
@@ -13,16 +13,13 @@ import RadarIcon from '@mui/icons-material/Radar';
 import WhatshotIcon from '@mui/icons-material/Whatshot';
 import AddchartIcon from '@mui/icons-material/Addchart';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
-import Grid from '@mui/material/GridLegacy';
+
 // arriba de App.tsx
 import ScoreScreen from './components/ScoreScreen';
 import { FormControl, InputLabel, Select, MenuItem } from '@mui/material';
 import type { SelectChangeEvent } from '@mui/material/Select';
 import CloseIcon from '@mui/icons-material/Close';
 import IconButton from '@mui/material/IconButton';
-
-
-
 
 // ---- Tipos y constantes ----
 type Team = 'A' | 'B';
@@ -114,6 +111,9 @@ export default function App() {
   const [trivia, setTrivia] = useState<TriviaMsg | null>(null);
   const [weaponToUse, setWeaponToUse] = useState<string | null>(null);
   const [doubleShotPending, setDoubleShotPending] = useState<number>(0);
+  // justo con los demás useState
+  const [mode, setMode] = useState<'crear' | 'unirme'>('crear');
+
 
   const handleTeamChange = (e: SelectChangeEvent) => {
     setTeam(e.target.value as Team);
@@ -290,8 +290,8 @@ export default function App() {
 
       <Container sx={{ mt: 3 }}>
         <Paper sx={{ p: 2, mb: 2 }}>
-          <Grid container spacing={2} alignItems="center">
-            <Grid item xs={12} md={3}>
+          <Grid container spacing={3} alignItems="center">
+            <Grid size={{ xs: 12, md: 3 }}>
               <TextField
                 fullWidth
                 label="Tu nombre"
@@ -299,7 +299,9 @@ export default function App() {
                 onChange={(e) => setName(e.target.value)}
               />
             </Grid>
-            <Grid item xs={12} md={3}>
+          </Grid>
+          <Grid container spacing={3} alignItems="center">
+            <Grid size={{ xs: 12, md: 3 }}>
               <FormControl fullWidth>
                 <InputLabel id="team-label">Tu equipo</InputLabel>
                 <Select
@@ -324,52 +326,90 @@ export default function App() {
               </FormControl>
             </Grid>
 
-            <Grid item xs={12} md={7}>
-              <Stack direction="row" spacing={1}>
-                <Button variant="contained" startIcon={<GroupAddIcon />} onClick={createRoom}>
-                  Crear sala
-                </Button>
-                <TextField
-                  size="small"
-                  label="Código"
-                  value={code}
-                  onChange={(e) => setCode(e.target.value.toUpperCase())}
-                  sx={{ width: 160 }}
-                />
-                <Button variant="outlined" onClick={joinRoom}>
-                  Unirme
-                </Button>
-                <Divider orientation="vertical" flexItem sx={{ mx: 1 }} />
-                <Button
-                  variant="contained"
-                  color="secondary"
-                  startIcon={<PlayArrowIcon />}
-                  onClick={startGame}
-                  disabled={!isHost}
-                >
-                  Iniciar
-                </Button>
-                <Button
-                  variant="outlined"
-                  color="warning"
-                  onClick={() => {
-                    if (ws) {
-                      ws.send(JSON.stringify({ type: 'changeTeam' }));
-                    }
-                  }}
-                >
-                  Cambiar de equipo
-                </Button>
+            {/* Selector Crear/Unirme */}
+            <Grid size={{ xs: 12, md: 2 }}>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={mode === 'unirme'}
+                    onChange={(e) => setMode(e.target.checked ? 'unirme' : 'crear')}
+                    color="primary"
+                  />
+                }
+                label={mode === 'unirme' ? 'Unirme' : 'Crear sala'}
+              />
+            </Grid>
 
-              </Stack>
+            {/* Zona de acciones dependiente del modo */}
+            <Grid size={{ xs: 12, md: 7 }}>
+              {mode === 'crear' ? (
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Button
+                    variant="contained"
+                    startIcon={<GroupAddIcon />}
+                    onClick={createRoom}
+                  >
+                    Crear sala
+                  </Button>
+
+                  {/* Si ya hay código, muéstralo solo como lectura */}
+                  {code && (
+                    <TextField
+                      size="small"
+                      label="Código de sala"
+                      value={code}
+                      InputProps={{ readOnly: true }}
+                      sx={{ width: 180 }}
+                    />
+                  )}
+
+                  <Divider orientation="vertical" flexItem sx={{ mx: 1 }} />
+
+                  <Button
+                    variant="contained"
+                    color="secondary"
+                    startIcon={<PlayArrowIcon />}
+                    onClick={startGame}
+                    disabled={!isHost}
+                  >
+                    Iniciar
+                  </Button>
+
+                  <Button sx={{ visibility: 'hidden' }}
+                    variant="outlined"
+                    color="warning"
+                    onClick={() => {
+                      if (ws) {
+                        ws.send(JSON.stringify({ type: 'changeTeam' }));
+                      }
+                    }}
+                  >
+                    Cambiar de equipo
+                  </Button>
+                </Stack>
+              ) : (
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <TextField
+                    size="small"
+                    label="Código"
+                    value={code}
+                    onChange={(e) => setCode(e.target.value.toUpperCase())}
+                    sx={{ width: 160 }}
+                  />
+                  <Button variant="outlined" onClick={joinRoom}>
+                    Unirme
+                  </Button>
+                </Stack>
+              )}
             </Grid>
           </Grid>
+
         </Paper>
 
         {snapshot && (
           <Grid container spacing={2}>
             {/* Panel izquierda: tablero enemigo */}
-            <Grid item xs={12} md={8}>
+            <Grid size={{ xs: 12, md: 8 }}>
               <Paper sx={{ p: 2 }}>
                 <Stack direction="row" justifyContent="space-between" alignItems="center">
                   <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -402,7 +442,7 @@ export default function App() {
             </Grid>
 
             {/* Panel derecha: info, armas, estado */}
-            <Grid item xs={12} md={4}>
+            <Grid size={{ xs: 12, md: 4 }}>
               <Paper sx={{ p: 2, mb: 2 }}>
                 <Typography
                   variant="subtitle1"
@@ -584,8 +624,6 @@ export default function App() {
           </Paper>
         </Box>
       )}
-
-
 
       <Snackbar open={!!toast} autoHideDuration={3000} onClose={() => setToast(null)}>
         {trivia ? (
