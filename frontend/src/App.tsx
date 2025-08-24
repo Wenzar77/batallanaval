@@ -8,7 +8,6 @@ import {
   LinearProgress
 } from '@mui/material';
 
-
 import SportsEsportsIcon from '@mui/icons-material/SportsEsports';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import GroupAddIcon from '@mui/icons-material/GroupAdd';
@@ -16,82 +15,13 @@ import RadarIcon from '@mui/icons-material/Radar';
 import WhatshotIcon from '@mui/icons-material/Whatshot';
 import AddchartIcon from '@mui/icons-material/Addchart';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
+import CloseIcon from '@mui/icons-material/Close';
+import IconButton from '@mui/material/IconButton';
 
 import ScoreScreen from './components/ScoreScreen';
 import { FormControl, InputLabel, Select, MenuItem } from '@mui/material';
 import type { SelectChangeEvent } from '@mui/material/Select';
-import CloseIcon from '@mui/icons-material/Close';
-import IconButton from '@mui/material/IconButton';
-
-
-function FleetPanel({
-  teamNames,
-  shipsRemaining,
-}: {
-  teamNames: Record<Team, string>;
-  shipsRemaining: Record<Team, number>;
-}) {
-  const remA = shipsRemaining.A;
-  const remB = shipsRemaining.B;
-  const sunkA = FLEET_TOTAL_SHIPS - remA; // hundidos al equipo A
-  const sunkB = FLEET_TOTAL_SHIPS - remB; // hundidos al equipo B
-
-  return (
-    <>
-      <Typography variant="h6" gutterBottom>
-        Flota por equipo
-      </Typography>
-
-      {/* Equipo A */}
-      <Stack spacing={0.5} sx={{ mb: 1.5 }}>
-        <Stack direction="row" alignItems="center" spacing={1}>
-          <Avatar sx={{ width: 24, height: 24, fontSize: 14 }}>{TEAM_ICONS.A}</Avatar>
-          <Typography variant="subtitle2" sx={{ flexGrow: 1 }}>
-            <b>{teamNames.A}</b> — Restantes: {remA}/{FLEET_TOTAL_SHIPS} · Hundidos: {sunkA}
-          </Typography>
-        </Stack>
-        <LinearProgress variant="determinate" value={(remA / FLEET_TOTAL_SHIPS) * 100} />
-      </Stack>
-
-      {/* Equipo B */}
-      <Stack spacing={0.5} sx={{ mb: 1.5 }}>
-        <Stack direction="row" alignItems="center" spacing={1}>
-          <Avatar sx={{ width: 24, height: 24, fontSize: 14 }}>{TEAM_ICONS.B}</Avatar>
-          <Typography variant="subtitle2" sx={{ flexGrow: 1 }}>
-            <b>{teamNames.B}</b> — Restantes: {remB}/{FLEET_TOTAL_SHIPS} · Hundidos: {sunkB}
-          </Typography>
-        </Stack>
-        <LinearProgress variant="determinate" value={(remB / FLEET_TOTAL_SHIPS) * 100} />
-      </Stack>
-
-      <Divider sx={{ my: 1.5 }} />
-
-      <Typography variant="subtitle2" gutterBottom>
-        Composición de flota (por equipo)
-      </Typography>
-      <Stack direction="row" spacing={1} flexWrap="wrap">
-        {FLEET_INFO.map((f) => (
-          <Chip
-            key={f.key}
-            label={`${f.emoji} ${f.label} (${f.size}) ×${f.count}`}
-            variant="outlined"
-          />
-        ))}
-      </Stack>
-    </>
-  );
-}
-
-
-// --- Flota estándar y nombres amigables ---
-const FLEET_INFO = [
-  { key: 'carrier', label: 'Portaviones', size: 5, count: 1, emoji: '🛳️' },
-  { key: 'battleship', label: 'Acorazado', size: 4, count: 1, emoji: '🚢' },
-  { key: 'cruiser', label: 'Crucero', size: 3, count: 2, emoji: '🛥️' },
-  { key: 'destroyer', label: 'Destructor', size: 2, count: 3, emoji: '🚤' },
-];
-const FLEET_TOTAL_SHIPS = FLEET_INFO.reduce((s, f) => s + f.count, 0); // 7 barcos por equipo
-
+import { EndGameModal } from './components/EndGameModal';
 
 // ---- Tipos y constantes ----
 type Team = 'A' | 'B';
@@ -122,6 +52,17 @@ const ensureTokenInURL = (): string => {
   return t;
 };
 
+// --- Flota estándar y nombres amigables ---
+const FLEET_INFO = [
+  { key: 'carrier', label: 'Portaviones', size: 5, count: 1, emoji: '🛳️' },
+  { key: 'battleship', label: 'Acorazado', size: 4, count: 1, emoji: '🚢' },
+  { key: 'cruiser', label: 'Crucero', size: 3, count: 2, emoji: '🛥️' },
+  { key: 'destroyer', label: 'Destructor', size: 2, count: 3, emoji: '🚤' },
+];
+const FLEET_TOTAL_SHIPS = FLEET_INFO.reduce((s, f) => s + f.count, 0); // 7 barcos por equipo
+
+type TeamBreakdown = { hits?: number; sinks?: number; trivia?: number };
+
 type Snapshot = {
   code: string;
   state: 'lobby' | 'active' | `finished_A` | `finished_B`;
@@ -136,7 +77,16 @@ type Snapshot = {
   scores?: {
     teams: Record<Team, number>;
     players: { id: string; name: string; team: Team; points: number }[];
+    // NUEVO (opcional): detalle por equipo
+    breakdown?: {
+      teams: Record<Team, TeamBreakdown>;
+    };
   };
+  // Compatibilidad si tu server manda el breakdown fuera de scores:
+  teamStats?: Record<Team, TeamBreakdown>;
+  breakdown?: { teams?: Record<Team, TeamBreakdown> };
+  stats?: { teams?: Record<Team, TeamBreakdown> };
+
   trivia?: {
     nonce: string;
     toTeam: Team;
@@ -198,6 +148,80 @@ function GridBoard({
 // ---- Detección de pantalla de marcador ----
 const isScreen = typeof window !== 'undefined' && window.location.pathname.endsWith('/screen');
 
+/* ===============================
+   MODAL DE FIN DE JUEGO (integrado)
+   =============================== */
+
+type LeaderboardRow = {
+  teamId: Team | string;
+  teamName: string;
+  points: number;
+  hits?: number;
+  sinks?: number;
+  trivia?: number;
+};
+
+/* ===============================
+   Panel de Flota (tu versión)
+   =============================== */
+function FleetPanel({
+  teamNames,
+  shipsRemaining,
+}: {
+  teamNames: Record<Team, string>;
+  shipsRemaining: Record<Team, number>;
+}) {
+  const remA = shipsRemaining.A;
+  const remB = shipsRemaining.B;
+  const sunkA = FLEET_TOTAL_SHIPS - remA; // hundidos al equipo A
+  const sunkB = FLEET_TOTAL_SHIPS - remB; // hundidos al equipo B
+
+  return (
+    <>
+      <Typography variant="h6" gutterBottom>
+        Flota por equipo
+      </Typography>
+
+      {/* Equipo A */}
+      <Stack spacing={0.5} sx={{ mb: 1.5 }}>
+        <Stack direction="row" alignItems="center" spacing={1}>
+          <Avatar sx={{ width: 24, height: 24, fontSize: 14 }}>{TEAM_ICONS.A}</Avatar>
+          <Typography variant="subtitle2" sx={{ flexGrow: 1 }}>
+            <b>{teamNames.A}</b> — Restantes: {remA}/{FLEET_TOTAL_SHIPS} · Hundidos: {sunkA}
+          </Typography>
+        </Stack>
+        <LinearProgress variant="determinate" value={(remA / FLEET_TOTAL_SHIPS) * 100} />
+      </Stack>
+
+      {/* Equipo B */}
+      <Stack spacing={0.5} sx={{ mb: 1.5 }}>
+        <Stack direction="row" alignItems="center" spacing={1}>
+          <Avatar sx={{ width: 24, height: 24, fontSize: 14 }}>{TEAM_ICONS.B}</Avatar>
+          <Typography variant="subtitle2" sx={{ flexGrow: 1 }}>
+            <b>{teamNames.B}</b> — Restantes: {remB}/{FLEET_TOTAL_SHIPS} · Hundidos: {sunkB}
+          </Typography>
+        </Stack>
+        <LinearProgress variant="determinate" value={(remB / FLEET_TOTAL_SHIPS) * 100} />
+      </Stack>
+
+      <Divider sx={{ my: 1.5 }} />
+
+      <Typography variant="subtitle2" gutterBottom>
+        Composición de flota (por equipo)
+      </Typography>
+      <Stack direction="row" spacing={1} flexWrap="wrap">
+        {FLEET_INFO.map((f) => (
+          <Chip
+            key={f.key}
+            label={`${f.emoji} ${f.label} (${f.size}) ×${f.count}`}
+            variant="outlined"
+          />
+        ))}
+      </Stack>
+    </>
+  );
+}
+
 // ---- App principal ----
 export default function App() {
   const initialQS = useMemo(() => readQS(), []);
@@ -228,7 +252,6 @@ export default function App() {
     setMode('crear');
     setQS({ [QS_CODE]: null, [QS_TOKEN]: null }); // quitamos code y token de la URL
   };
-
 
   const handleTeamChange = (e: SelectChangeEvent) => {
     setTeam(e.target.value as Team);
@@ -334,6 +357,11 @@ export default function App() {
           setQS({ [QS_CODE]: null, [QS_TOKEN]: null });
         }
 
+        // Si tu server manda evento explícito de final (opcional):
+        if (data.type === 'gameOver' && data.payload?.scores) {
+          // Aquí podrías procesar un breakdown alterno si viene en payload,
+          // pero normalmente roomUpdate ya trae snapshot final.
+        }
       };
 
       socket.onclose = () => {
@@ -429,6 +457,60 @@ export default function App() {
     acc[w] = (acc[w] || 0) + 1;
     return acc;
   }, {});
+
+  /* ===============================
+     DERIVADOS PARA FIN DE JUEGO + BREAKDOWN
+     =============================== */
+  const gameOver = snapshot?.state === 'finished_A' || snapshot?.state === 'finished_B';
+
+  const winnerTeamId: Team | null = (() => {
+    if (!snapshot) return null;
+    if (snapshot.state === 'finished_A') return 'A';
+    if (snapshot.state === 'finished_B') return 'B';
+    // Si tu server define empate con otra señal, podrías devolver null ahí.
+    return null;
+  })();
+
+  // Obtiene breakdown por equipo desde múltiples posibles ubicaciones (compat).
+  const teamBreakdown: Record<Team, TeamBreakdown> | undefined = useMemo(() => {
+    if (!snapshot) return undefined;
+    const fromScores = snapshot.scores?.breakdown?.teams;
+    const fromRoot1 = snapshot.teamStats;
+    const fromRoot2 = snapshot.breakdown?.teams;
+    const fromRoot3 = snapshot.stats?.teams;
+    return (fromScores || fromRoot1 || fromRoot2 || fromRoot3) as
+      | Record<Team, TeamBreakdown>
+      | undefined;
+  }, [snapshot]);
+
+  const finalLeaderboard: LeaderboardRow[] = useMemo(() => {
+    const tn = snapshot?.teamNames ?? DEFAULT_TEAM_NAMES;
+    const teamScores = snapshot?.scores?.teams ?? { A: 0, B: 0 };
+
+    const rowA: LeaderboardRow = {
+      teamId: 'A',
+      teamName: tn.A,
+      points: teamScores.A ?? 0,
+      ...(teamBreakdown?.A ?? {}),
+    };
+    const rowB: LeaderboardRow = {
+      teamId: 'B',
+      teamName: tn.B,
+      points: teamScores.B ?? 0,
+      ...(teamBreakdown?.B ?? {}),
+    };
+
+    return [rowA, rowB].sort((a, b) => b.points - a.points);
+  }, [snapshot, teamBreakdown]);
+
+  const handleRestart = () => {
+    // Notifica reinicio al server; éste debe volver a emitir roomUpdate con state 'lobby' o 'active'
+    ws?.send(JSON.stringify({ type: 'restartGame' }));
+  };
+
+  const handleExit = () => {
+    leaveGame();
+  };
 
   // ---- Pantalla de marcador dedicada ----
   if (isScreen && snapshot) {
@@ -615,7 +697,17 @@ export default function App() {
           <Grid container spacing={2}>
             {/* Panel izquierda: tablero enemigo */}
             <Grid size={{ xs: 12, md: 8 }}>
-              <Paper sx={{ p: 2 }}>
+              <Paper
+                sx={{
+                  p: 2,
+                  transition: 'all .25s ease',
+                  ...(gameOver && {
+                    filter: 'grayscale(0.4) blur(1px)',
+                    opacity: 0.4,
+                    pointerEvents: 'none',
+                  })
+                }}
+              >
                 <Stack direction="row" justifyContent="space-between" alignItems="center">
                   <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                     Atacando a <b>{teamNames[enemyTeam]}</b>
@@ -628,10 +720,10 @@ export default function App() {
                     <Chip
                       label={
                         snapshot.state === 'active'
-                          ? myTurn ? 'Tu turno' : 'Turno rival'
+                          ? ( (snapshot.turnTeam === team) ? 'Tu turno' : 'Turno rival' )
                           : snapshot.state
                       }
-                      color={myTurn ? 'success' : 'default'}
+                      color={(snapshot.state === 'active' && snapshot.turnTeam === team) ? 'success' : 'default'}
                     />
                     <Chip
                       variant="outlined"
@@ -647,7 +739,7 @@ export default function App() {
                     hits={hitsEnemy}
                     misses={missesEnemy}
                     onClick={fireAt}
-                    disabled={!myTurn}
+                    disabled={!myTurn || gameOver}
                   />
                 </Box>
               </Paper>
@@ -655,7 +747,13 @@ export default function App() {
 
             {/* Panel derecha: info, armas, estado */}
             <Grid size={{ xs: 12, md: 4 }}>
-              <Paper sx={{ p: 2, mb: 2 }}>
+              <Paper
+                sx={{
+                  p: 2, mb: 2,
+                  transition: 'all .25s ease',
+                  ...(gameOver && { filter: 'grayscale(0.4)', opacity: 0.6, pointerEvents: 'none' })
+                }}
+              >
                 <Typography
                   variant="subtitle1"
                   sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}
@@ -677,7 +775,13 @@ export default function App() {
                 />
               </Paper>
 
-              <Paper sx={{ p: 2, mb: 2 }}>
+              <Paper
+                sx={{
+                  p: 2, mb: 2,
+                  transition: 'all .25s ease',
+                  ...(gameOver && { filter: 'grayscale(0.4)', opacity: 0.6, pointerEvents: 'none' })
+                }}
+              >
                 <Typography variant="h6" gutterBottom>
                   Armas del equipo {team} ({teamNames[team]})
                 </Typography>
@@ -712,7 +816,13 @@ export default function App() {
                 )}
               </Paper>
 
-              <Paper sx={{ p: 2 }}>
+              <Paper
+                sx={{
+                  p: 2,
+                  transition: 'all .25s ease',
+                  ...(gameOver && { filter: 'grayscale(0.4)', opacity: 0.6 })
+                }}
+              >
                 <Typography variant="h6" gutterBottom>
                   Jugadores
                 </Typography>
@@ -830,6 +940,7 @@ export default function App() {
         </Box>
       )}
 
+      {/* Snackbar / Toast */}
       <Snackbar open={!!toast} autoHideDuration={3000} onClose={() => setToast(null)}>
         {trivia ? (
           <Alert severity={trivia.canAnswer ? 'success' : 'warning'} sx={{ mb: 2 }}>
@@ -843,6 +954,16 @@ export default function App() {
           </Alert>
         )}
       </Snackbar>
+
+      {/* ===== MODAL DE FIN DE JUEGO ===== */}
+      <EndGameModal
+        open={!!gameOver}
+        winnerTeamId={winnerTeamId}
+        leaderboard={finalLeaderboard}
+        onRestart={handleRestart}
+        onExit={handleExit}
+        title="¡Partida terminada!"
+      />
     </>
   );
 }
