@@ -292,6 +292,7 @@ export default function App() {
   // Celdas privadas de MI flota, recibidas por WS (solo para este cliente)
   const [myFleetCells, setMyFleetCells] = useState<string[] | null>(null);
 
+  let wasActive = false;
   const leaveGame = () => {
     if (!ws) return;
     ws.send(JSON.stringify({ type: 'leaveRoom' }));
@@ -343,14 +344,11 @@ export default function App() {
         setConnected(true);
         retry = 0;
 
-        // Si hay code+token en URL ⇒ intenta resume inmediatamente
         const qs = readQS();
         let urlCode = (qs.get(QS_CODE) ?? '').toUpperCase();
         let urlToken = qs.get(QS_TOKEN) ?? '';
 
-        // Si hay sala conocida en estado y no está en URL, súbela a la URL
         if (!urlCode && code) { urlCode = code; setQS({ [QS_CODE]: code }); }
-        // Asegura token en URL si no hay
         if (!urlToken) {
           urlToken = ensureTokenInURL();
           setClientId(urlToken);
@@ -360,7 +358,7 @@ export default function App() {
 
         if (urlCode && urlToken) {
           socket!.send(JSON.stringify({ type: 'resume', code: urlCode, clientId: urlToken }));
-          // Fallback: si no llega snapshot pronto, intenta join con datos mínimos
+          // Fallback join si no llega snapshot pronto
           setTimeout(() => {
             if (!socket || socket.readyState !== 1) return;
             if (!gotFirstSnapshot) {
@@ -375,13 +373,10 @@ export default function App() {
           }, 600);
         }
 
-        // Pide explícitamente tus celdas al servidor (mensaje simple)
+        // 🔁 Pide tus celdas un poco DESPUÉS del resume/join
         setTimeout(() => {
-          try {
-            socket?.send(JSON.stringify({ type: 'requestMyFleet' }));
-          } catch { }
-        }, 300);
-
+          try { socket?.send(JSON.stringify({ type: 'requestMyFleet' })); } catch { }
+        }, 800); // ← subí de 300 a 800ms
       };
 
       socket.onmessage = (ev) => {
@@ -425,6 +420,12 @@ export default function App() {
           setMyFleetCells(data.shipCells);
         }
 
+        // 🔁 Si acaba de pasar a active (tableros listos), pide tu flota
+        const isActive = data.snapshot?.state === 'active';
+        if (isActive && !wasActive) {
+          wasActive = true;
+          try { ws?.send(JSON.stringify({ type: 'requestMyFleet' })); } catch { }
+        }
 
         // Si tu server manda evento explícito de final (opcional):
         if (data.type === 'gameOver' && data.payload?.scores) {
@@ -492,14 +493,15 @@ export default function App() {
 
   // Tus barcos / celdas ocupadas por tu flota (busca por cliente y por equipo)
   const ownShips = useMemo(() => {
-    // Prioridad 1: lo que ya recibí por WS de forma privada
+    // Prioridad 1: lo que llegó por WS de forma privada
     if (myFleetCells && myFleetCells.length > 0) {
       return new Set<string>(myFleetCells);
     }
-    // Prioridad 2: intenta descubrir rutas en el snapshot (equipo/cliente)
+    // Prioridad 2: intentar deducir desde snapshot
     if (!snapshot) return new Set<string>();
     return new Set<string>(getTeamShipCells(snapshot, team, clientId));
   }, [snapshot, team, clientId, myFleetCells]);
+
 
 
   const myTurn = !!(snapshot && snapshot.state === 'active' && snapshot.turnTeam === team);
@@ -887,7 +889,7 @@ export default function App() {
                     <Chip size="small" label="Fallo" sx={{ bgcolor: '#90caf9' }} />
                   </Stack>
                 </Stack>
-                
+
 
                 <Box sx={{ mt: 2, overflow: 'auto' }}>
                   <GridBoard
