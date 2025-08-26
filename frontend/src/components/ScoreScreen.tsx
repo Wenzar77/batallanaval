@@ -1,5 +1,4 @@
 // src/components/ScoreScreen.tsx
-import React from 'react';
 import { Box, Paper, Typography, Stack, Chip, Avatar, Grid } from '@mui/material';
 import { keyframes } from '@mui/system';
 
