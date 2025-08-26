@@ -74,7 +74,7 @@ export default function App() {
             }
           }, 600);
         }
-        setTimeout(() => { try { socket?.send(JSON.stringify({ type: 'requestMyFleet' })); } catch {} }, 800);
+        setTimeout(() => { try { socket?.send(JSON.stringify({ type: 'requestMyFleet' })); } catch { } }, 800);
       };
       socket.onmessage = (ev) => {
         const data = JSON.parse(ev.data);
@@ -91,13 +91,13 @@ export default function App() {
         if (data.type === 'myFleetCells' && Array.isArray(data.cells)) setMyFleetCells(data.cells);
         if (data.type === 'playerBoard' && Array.isArray(data.shipCells)) setMyFleetCells(data.shipCells);
         const isActive = data.snapshot?.state === 'active';
-        if (isActive && !wasActive) { wasActive = true; try { ws?.send(JSON.stringify({ type: 'requestMyFleet' })); } catch {} }
+        if (isActive && !wasActive) { wasActive = true; try { ws?.send(JSON.stringify({ type: 'requestMyFleet' })); } catch { } }
       };
       socket.onclose = () => { setConnected(false); setWs(null); if (!closedByUs) { const delay = Math.min(1000 * 2 ** retry, 8000); retry += 1; setTimeout(connect, delay); } };
-      socket.onerror = () => {};
+      socket.onerror = () => { };
     };
     connect();
-    return () => { closedByUs = true; try { socket?.close(); } catch {} };
+    return () => { closedByUs = true; try { socket?.close(); } catch { } };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -162,7 +162,7 @@ export default function App() {
 
         {snapshot && (
           <Grid container spacing={2}>
-            <Grid xs={12} md={8}>
+            <Grid size={{ xs: 12, md: 8 }}>
               <SectionCard disabledStyling={gameOver} compact>
                 <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={1}>
                   <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
@@ -195,7 +195,7 @@ export default function App() {
               </SectionCard>
             </Grid>
 
-            <Grid xs={12} md={4}>
+            <Grid size={{ xs: 12, md: 4 }}>
               <SectionCard disabledStyling={gameOver} compact>
                 <Typography variant="subtitle1" sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1, flexWrap: 'wrap' }}>
                   Turno:
