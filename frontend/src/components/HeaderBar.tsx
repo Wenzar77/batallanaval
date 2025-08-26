@@ -45,12 +45,12 @@ const HeaderBar: React.FC<{
           sx={{ ml: 1, color: 'primary.main', bgcolor: 'white', fontWeight: 'bold', '&:hover': { bgcolor: 'grey.100' } }}
           size={isXs ? 'small' : 'medium'}
         >
-          {isXs ? 'Tablero' : 'TABLERO'}
+          {isXs ? '' : 'TABLERO'}
         </Button>
 
         {snapshot?.state === 'active' && (
           <Button onClick={onLeave} color="error" variant="contained" startIcon={<PowerSettingsNewIcon />} sx={{ ml: 1, bgcolor: 'white', color: 'error.main', fontWeight: 'bold' }} size={isXs ? 'small' : 'medium'}>
-            {isXs ? 'Salir' : 'DESCONECTAR'}
+            {isXs ? '' : 'DESCONECTAR'}
           </Button>
         )}
       </Toolbar>
