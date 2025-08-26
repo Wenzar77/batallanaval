@@ -13,13 +13,13 @@ import ScoreScreen from './components/ScoreScreen';
 import { EndGameModal } from './components/EndGameModal';
 import { useResponsiveBoard } from './hooks/useResponsive';
 import { SIZE, DEFAULT_TEAM_NAMES, TEAM_ICONS, getTeamShipCells, FLEET_TOTAL_SHIPS } from './utils/fleet';
-import { buildScreenUrl, ensureTokenInURL, readQS, setQS, QS_CODE, QS_TOKEN } from './utils/url';
+import { ensureTokenInURL, readQS, setQS, QS_CODE, QS_TOKEN } from './utils/url';
 import type { Snapshot, Team, TriviaMsg, TeamBreakdown } from './types/game';
 
 const isScreen = typeof window !== 'undefined' && window.location.pathname.endsWith('/screen');
 
 export default function App() {
-  const { isXs, cellSize, boardScrollMaxW } = useResponsiveBoard();
+  const { cellSize, boardScrollMaxW } = useResponsiveBoard();
 
   const initialQS = useMemo(() => readQS(), []);
   const initialCode = (initialQS.get(QS_CODE) ?? '').toUpperCase();
@@ -39,6 +39,7 @@ export default function App() {
   const [doubleShotPending, setDoubleShotPending] = useState<number>(0);
   const [mode, setMode] = useState<'crear' | 'unirme'>('crear');
   const [myFleetCells, setMyFleetCells] = useState<string[] | null>(null);
+  const isScreen = typeof window !== 'undefined' && window.location.pathname.endsWith('/screen');
 
   let wasActive = false;
   const leaveGame = () => {
@@ -75,7 +76,17 @@ export default function App() {
           }, 600);
         }
         setTimeout(() => { try { socket?.send(JSON.stringify({ type: 'requestMyFleet' })); } catch { } }, 800);
+
+        if (isScreen) {
+          const qs = new URL(window.location.href).searchParams;
+          const urlCode = (qs.get('code') ?? '').toUpperCase();
+          if (urlCode) {
+            socket!.send(JSON.stringify({ type: 'watchRoom', code: urlCode }));
+          }
+        }
+
       };
+
       socket.onmessage = (ev) => {
         const data = JSON.parse(ev.data);
         if (data.type === 'roomCreated') {

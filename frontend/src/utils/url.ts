@@ -23,9 +23,9 @@ export const ensureTokenInURL = (): string => {
   return t;
 };
 
+// utils/url.ts
 export const buildScreenUrl = (roomCode: string): string => {
-  const token = ensureTokenInURL();
   const base = `${window.location.origin}/screen`;
-  const params = new URLSearchParams({ [QS_CODE]: roomCode, [QS_TOKEN]: token });
+  const params = new URLSearchParams({ [QS_CODE]: roomCode });
   return `${base}?${params.toString()}`;
 };
