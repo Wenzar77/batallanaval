@@ -1,5 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Container, Stack, Typography, Chip, Divider, Snackbar, Alert, Box, Grid } from '@mui/material';
+import { useEffect, useMemo, useState, useRef } from 'react';
+import {
+  Container, Stack, Typography, Chip, Divider, Snackbar, Alert, Box, Grid,
+  Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField
+} from '@mui/material';
 import HeaderBar from './components/HeaderBar';
 import Lobby from './components/Lobby';
 import SectionCard from './components/SectionCard';
@@ -17,6 +20,9 @@ import { ensureTokenInURL, readQS, setQS, QS_CODE, QS_TOKEN } from './utils/url'
 import type { Snapshot, Team, TriviaMsg, TeamBreakdown } from './types/game';
 
 const isScreen = typeof window !== 'undefined' && window.location.pathname.endsWith('/screen');
+
+
+
 
 export default function App() {
   const { cellSize, boardScrollMaxW } = useResponsiveBoard();
@@ -39,9 +45,12 @@ export default function App() {
   const [doubleShotPending, setDoubleShotPending] = useState<number>(0);
   const [mode, setMode] = useState<'crear' | 'unirme'>('crear');
   const [myFleetCells, setMyFleetCells] = useState<string[] | null>(null);
-  const isScreen = typeof window !== 'undefined' && window.location.pathname.endsWith('/screen');
 
-  let wasActive = false;
+  // --- NUEVO: diálogo para pedir el código al presionar "Ver tablero"
+  const [askCodeOpen, setAskCodeOpen] = useState(false);
+  const [inputCode, setInputCode] = useState<string>('');
+
+  const wasActiveRef = useRef(false);
   const leaveGame = () => {
     if (!ws) return;
     ws.send(JSON.stringify({ type: 'leaveRoom' }));
@@ -54,18 +63,42 @@ export default function App() {
   const turnPlayer = snapshot?.turnPlayerId ? snapshot.players.find(p => p.id === snapshot.turnPlayerId) : undefined;
   const turnPlayerName = turnPlayer?.name ?? null;
 
+  const fireAt = (i: number, j: number) => {
+    if (!ws || !myTurn) return;
+    const weapon = weaponToUse || undefined;
+    ws.send(JSON.stringify({ type: 'fire', x: i, y: j, weapon }));
+    if (weapon === 'doubleShot') {
+      if (doubleShotPending === 0) setDoubleShotPending(1);
+      else {
+        setDoubleShotPending(0);
+        setWeaponToUse(null);
+      }
+    } else {
+      setWeaponToUse(null);
+    }
+  };
+
   useEffect(() => {
     const wsUrl = (import.meta.env.VITE_WS_URL as string) || 'ws://localhost:3000/ws';
     let socket: WebSocket | null = null; let retry = 0; let closedByUs = false; let gotFirstSnapshot = false;
+
     const connect = () => {
       socket = new WebSocket(wsUrl);
+
       socket.onopen = () => {
-        setWs(socket); setConnected(true); retry = 0;
+        setWs(socket);
+        setConnected(true);
+        retry = 0;
+
+        // Tokens / QS
         const qs = readQS();
         let urlCode = (qs.get(QS_CODE) ?? '').toUpperCase();
         let urlToken = qs.get(QS_TOKEN) ?? '';
+
         if (!urlCode && code) { urlCode = code; setQS({ [QS_CODE]: code }); }
         if (!urlToken) { urlToken = ensureTokenInURL(); setClientId(urlToken); } else if (!clientId) { setClientId(urlToken); }
+
+        // Reanudar si ya había código y token
         if (urlCode && urlToken) {
           socket!.send(JSON.stringify({ type: 'resume', code: urlCode, clientId: urlToken }));
           setTimeout(() => {
@@ -75,46 +108,77 @@ export default function App() {
             }
           }, 600);
         }
+
+        // Pide mi flota (si aplica)
         setTimeout(() => { try { socket?.send(JSON.stringify({ type: 'requestMyFleet' })); } catch { } }, 800);
 
+        // Modo pantalla (ruta /screen) -> observar sala por código en URL
         if (isScreen) {
-          const qs = new URL(window.location.href).searchParams;
-          const urlCode = (qs.get('code') ?? '').toUpperCase();
-          if (urlCode) {
-            socket!.send(JSON.stringify({ type: 'watchRoom', code: urlCode }));
+          const qs2 = new URL(window.location.href).searchParams;
+          const urlCode2 = (qs2.get('code') ?? '').toUpperCase();
+          if (urlCode2) {
+            socket!.send(JSON.stringify({ type: 'watchRoom', code: urlCode2 }));
           }
         }
-
       };
 
       socket.onmessage = (ev) => {
         const data = JSON.parse(ev.data);
+
         if (data.type === 'roomCreated') {
           const newCode: string = data.code; setCode(newCode);
           const token = clientId || ensureTokenInURL(); if (!clientId) setClientId(token);
           setQS({ [QS_CODE]: newCode, [QS_TOKEN]: token });
         }
-        if (data.type === 'roomUpdate') { gotFirstSnapshot = true; setSnapshot(data.snapshot); if (!data.snapshot.trivia) setTrivia(null); }
+
+        if (data.type === 'roomUpdate') {
+          gotFirstSnapshot = true;
+          setSnapshot(data.snapshot);
+          if (!data.snapshot.trivia) setTrivia(null);
+        }
+
         if (data.type === 'toast') setToast(data.message);
         if (data.type === 'trivia') setTrivia(data);
         if (data.type === 'triviaEnd') setTrivia(null);
-        if (data.type === 'left') { setSnapshot(null); setIsHost(false); setCode(''); setMode('crear'); setQS({ [QS_CODE]: null, [QS_TOKEN]: null }); }
+
+        if (data.type === 'left') {
+          setSnapshot(null); setIsHost(false); setCode(''); setMode('crear');
+          setQS({ [QS_CODE]: null, [QS_TOKEN]: null });
+        }
+
         if (data.type === 'myFleetCells' && Array.isArray(data.cells)) setMyFleetCells(data.cells);
         if (data.type === 'playerBoard' && Array.isArray(data.shipCells)) setMyFleetCells(data.shipCells);
+
         const isActive = data.snapshot?.state === 'active';
-        if (isActive && !wasActive) { wasActive = true; try { ws?.send(JSON.stringify({ type: 'requestMyFleet' })); } catch { } }
+        if (isActive && !wasActiveRef.current) {
+          wasActiveRef.current = true;
+          try { ws?.send(JSON.stringify({ type: 'requestMyFleet' })); } catch { }
+        }
+
       };
-      socket.onclose = () => { setConnected(false); setWs(null); if (!closedByUs) { const delay = Math.min(1000 * 2 ** retry, 8000); retry += 1; setTimeout(connect, delay); } };
-      socket.onerror = () => { };
+
+      socket.onclose = () => {
+        setConnected(false); setWs(null);
+        if (!closedByUs) {
+          const delay = Math.min(1000 * 2 ** retry, 8000);
+          retry += 1;
+          setTimeout(connect, delay);
+        }
+      };
+
+      socket.onerror = () => { /* noop */ };
     };
+
     connect();
     return () => { closedByUs = true; try { socket?.close(); } catch { } };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (!trivia) return; const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setTrivia(null); };
-    window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
+    if (!trivia) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setTrivia(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, [trivia]);
 
   const hitsEnemy = useMemo(() => (!snapshot ? new Set<string>() : new Set(team === 'A' ? snapshot.history.A : snapshot.history.B)), [snapshot, team]);
@@ -124,11 +188,55 @@ export default function App() {
   const ownShips = useMemo(() => (myFleetCells?.length ? new Set(myFleetCells) : new Set(!snapshot ? [] : getTeamShipCells(snapshot, team, clientId))), [snapshot, team, clientId, myFleetCells]);
   const myTurn = !!(snapshot && snapshot.state === 'active' && snapshot.turnTeam === team);
 
-  const createRoom = () => { if (!ws) return; setIsHost(true); const token = clientId || ensureTokenInURL(); if (!clientId) setClientId(token); ws.send(JSON.stringify({ type: 'createRoom', name: name || 'Host', team, clientId: token })); };
-  const joinRoom = () => { if (!ws || !code) return; setIsHost(false); const token = clientId || ensureTokenInURL(); if (!clientId) setClientId(token); setQS({ [QS_CODE]: code, [QS_TOKEN]: token }); ws.send(JSON.stringify({ type: 'joinRoom', code, name: name || 'Jugador', team, clientId: token })); };
-  const startGame = () => ws && ws.send(JSON.stringify({ type: 'startGame' }));
-  const fireAt = (i: number, j: number) => { if (!ws || !myTurn) return; const weapon = weaponToUse || undefined; ws.send(JSON.stringify({ type: 'fire', x: i, y: j, weapon })); if (weapon === 'doubleShot') { if (doubleShotPending === 0) setDoubleShotPending(1); else { setDoubleShotPending(0); setWeaponToUse(null); } } else { setWeaponToUse(null); } };
-  const answerTrivia = (idx: number) => { if (!ws || !trivia) return; ws.send(JSON.stringify({ type: 'answerTrivia', nonce: trivia.nonce, answerIndex: idx })); setTrivia(null); };
+  const createRoom = () => {
+    if (!ws) return;
+    setIsHost(true);
+    const token = clientId || ensureTokenInURL();
+    if (!clientId) setClientId(token);
+    ws.send(JSON.stringify({ type: 'createRoom', name: name || 'Host', team, clientId: token }));
+  };
+
+  const joinRoom = () => {
+    if (!ws || !code) return;
+    setIsHost(false);
+    const token = clientId || ensureTokenInURL();
+    if (!clientId) setClientId(token);
+    setQS({ [QS_CODE]: code, [QS_TOKEN]: token });
+    ws.send(JSON.stringify({ type: 'joinRoom', code, name: name || 'Jugador', team, clientId: token }));
+  };
+
+  // 🔁 Reemplaza SOLO esta función
+  const startGame = () => {
+    if (!ws) return;
+
+    // Si aún no hay snapshot, deja que el server valide
+    if (!snapshot) {
+      ws.send(JSON.stringify({ type: 'startGame' }));
+      return;
+    }
+
+    const countA = snapshot.players?.filter(p => p.team === 'A').length ?? 0;
+    const countB = snapshot.players?.filter(p => p.team === 'B').length ?? 0;
+
+    if (countA < 1 || countB < 1) {
+      const msg =
+        countA < 1 && countB < 1
+          ? 'No puedes iniciar: Jaguares y Guacamayas no tienen jugadores.'
+          : countA < 1
+            ? 'No puedes iniciar: Jaguares no tiene jugadores.'
+            : 'No puedes iniciar: Guacamayas no tiene jugadores.';
+      setToast(msg);
+      return;
+    }
+
+    ws.send(JSON.stringify({ type: 'startGame' }));
+  };
+
+  const answerTrivia = (idx: number) => {
+    if (!ws || !trivia) return;
+    ws.send(JSON.stringify({ type: 'answerTrivia', nonce: trivia.nonce, answerIndex: idx }));
+    setTrivia(null);
+  };
 
   const myWeapons = snapshot?.weapons?.[team] || [];
   const weaponCounts = myWeapons.reduce<Record<string, number>>((acc, w) => { acc[w] = (acc[w] || 0) + 1; return acc; }, {});
@@ -150,11 +258,43 @@ export default function App() {
     ]).sort((a, b) => b.points - a.points);
   }, [snapshot, teamBreakdown]);
 
-  if (isScreen && snapshot) return (<ScoreScreen snapshot={snapshot} teamNames={teamNames} teamIcons={TEAM_ICONS} activePlayerId={snapshot.turnPlayerId ?? null} />);
+  // --- Handlers del botón "Ver tablero"
+  const openWatchDialog = () => {
+    setInputCode(code || '');
+    setAskCodeOpen(true);
+  };
+
+  const confirmWatch = () => {
+    const room = (inputCode || '').toUpperCase().trim();
+    if (!room || !ws) { setAskCodeOpen(false); return; }
+    setCode(room);
+    setQS({ [QS_CODE]: room }); // guardamos en URL
+    ws.send(JSON.stringify({ type: 'watchRoom', code: room }));
+    setAskCodeOpen(false);
+  };
+
+  if (isScreen && snapshot) {
+    return (
+      <ScoreScreen
+        snapshot={snapshot}
+        teamNames={teamNames}
+        teamIcons={TEAM_ICONS}
+        activePlayerId={snapshot.turnPlayerId ?? null}
+      />
+    );
+  }
 
   return (
     <>
-      <HeaderBar snapshot={snapshot} teamNames={teamNames} code={code} connected={connected} onLeave={leaveGame} setToast={setToast} />
+      <HeaderBar
+        snapshot={snapshot}
+        teamNames={teamNames}
+        code={code}
+        connected={connected}
+        onLeave={leaveGame}
+        setToast={setToast}
+      />
+
       <Container sx={{ mt: 3, pb: 3 }}>
         {snapshot?.state === 'active' ? (
           <SectionCard compact>
@@ -167,7 +307,27 @@ export default function App() {
           </SectionCard>
         ) : (
           <SectionCard compact>
-            <Lobby name={name} setName={setName} team={team} setTeam={setTeam} mode={mode} setMode={setMode} code={code} setCode={setCode} teamNames={teamNames} isHost={isHost} onCreate={createRoom} onStart={startGame} onJoin={joinRoom} />
+            <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'flex-start', sm: 'center' }} justifyContent="space-between" spacing={1.5}>
+              <Typography variant="subtitle1">Lobby</Typography>
+              {/* Botón para ver tablero en modo espectador */}
+              <Button variant="outlined" size="small" onClick={openWatchDialog}>
+                Ver tablero
+              </Button>
+            </Stack>
+
+            <Box mt={1.5}>
+              <Lobby
+                name={name} setName={setName}
+                team={team} setTeam={setTeam}
+                mode={mode} setMode={setMode}
+                code={code} setCode={setCode}
+                teamNames={teamNames}
+                isHost={isHost}
+                onCreate={createRoom}
+                onStart={startGame}
+                onJoin={joinRoom}
+              />
+            </Box>
           </SectionCard>
         )}
 
@@ -180,7 +340,11 @@ export default function App() {
                     Atacando a <b>{teamNames[enemyTeam]}</b>
                   </Typography>
                   <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-                    <Chip label={snapshot.state === 'active' ? ((snapshot.turnTeam === team) ? 'Tu turno' : 'Turno rival') : snapshot.state} color={(snapshot.state === 'active' && snapshot.turnTeam === team) ? 'success' : 'default'} size="small" />
+                    <Chip
+                      label={snapshot.state === 'active' ? ((snapshot.turnTeam === team) ? 'Tu turno' : 'Turno rival') : snapshot.state}
+                      color={(snapshot.state === 'active' && snapshot.turnTeam === team) ? 'success' : 'default'}
+                      size="small"
+                    />
                     <Chip variant="outlined" color="primary" size="small" label={`Objetivo: ${teamNames[enemyTeam]} · ${snapshot.shipsRemaining[enemyTeam]}/${FLEET_TOTAL_SHIPS}`} />
                   </Stack>
                 </Stack>
@@ -248,7 +412,35 @@ export default function App() {
         )}
       </Snackbar>
 
-      <EndGameModal open={!!gameOver} winnerTeamId={winnerTeamId} leaderboard={finalLeaderboard} onRestart={() => ws?.send(JSON.stringify({ type: 'restartGame' }))} onExit={leaveGame} title="¡Partida terminada!" />
+      <EndGameModal
+        open={!!gameOver}
+        winnerTeamId={winnerTeamId}
+        leaderboard={finalLeaderboard}
+        onRestart={() => ws?.send(JSON.stringify({ type: 'restartGame' }))}
+        onExit={leaveGame}
+        title="¡Partida terminada!"
+      />
+
+      {/* Diálogo de código de sala para ver tablero */}
+      <Dialog open={askCodeOpen} onClose={() => setAskCodeOpen(false)}>
+        <DialogTitle>Ver tablero</DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            margin="dense"
+            label="Código de la sala"
+            fullWidth
+            value={inputCode}
+            onChange={(e) => setInputCode(e.target.value.toUpperCase())}
+            inputProps={{ style: { textTransform: 'uppercase', letterSpacing: '2px' } }}
+            placeholder="ABCD"
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAskCodeOpen(false)}>Cancelar</Button>
+          <Button variant="contained" onClick={confirmWatch}>Ver</Button>
+        </DialogActions>
+      </Dialog>
     </>
   );
 }
