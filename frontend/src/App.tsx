@@ -345,7 +345,9 @@ export default function App() {
         connected={connected}
         onLeave={leaveGame}
         setToast={setToast}
+        onWatch={openWatchDialog}   // 👈 aquí
       />
+
 
       <Container sx={{ mt: 3, pb: 3 }}>
         {snapshot?.state === 'active' ? (
@@ -360,11 +362,7 @@ export default function App() {
         ) : (
           <SectionCard compact>
             <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'flex-start', sm: 'center' }} justifyContent="space-between" spacing={1.5}>
-              <Typography variant="subtitle1">Lobby</Typography>
-              {/* Botón para ver tablero en modo espectador */}
-              <Button variant="outlined" size="small" onClick={openWatchDialog}>
-                Ver tablero
-              </Button>
+              <Typography variant="subtitle1">Lobby</Typography>              
             </Stack>
 
             <Box mt={1.5}>

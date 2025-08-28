@@ -15,17 +15,31 @@ const HeaderBar: React.FC<{
   connected: boolean;
   onLeave: () => void;
   setToast: (s: string | null) => void;
-}> = ({ snapshot, teamNames, code, connected, onLeave, setToast }) => {
+  /** Si no hay código de sala, esto abre el diálogo para "Ver tablero" */
+  onWatch?: () => void;
+}> = ({ snapshot, teamNames, code, connected, onLeave, setToast, onWatch }) => {
   const theme = useTheme();
   const isXs = useMediaQuery(theme.breakpoints.down('sm'));
 
-  // 👇 Considera "empezado" si está en juego o ya terminó
   const gameStarted =
     snapshot?.state === 'active' ||
     snapshot?.state === 'finished_A' ||
     snapshot?.state === 'finished_B';
 
   const roomCode = snapshot?.code || code;
+
+  const handleOpenBoard = () => {
+    if (roomCode) {
+      const url = buildScreenUrl(roomCode);
+      window.open(url, '_blank', 'noopener');
+      return;
+    }
+    if (onWatch) {
+      onWatch(); // abre el diálogo para ingresar código
+    } else {
+      setToast('No hay sala activa. Ingresa un código para ver el tablero.');
+    }
+  };
 
   return (
     <AppBar position="sticky" color="primary" enableColorOnDark>
@@ -48,18 +62,20 @@ const HeaderBar: React.FC<{
           sx={{ mr: 1, maxWidth: isXs ? 140 : 'unset' }}
         />
 
-        <Tooltip title="Abrir tablero en una nueva pestaña">
+        {/* 👇 Botón TABLERO ahora sí renderizado */}
+        <Tooltip title={roomCode ? 'Abrir tablero en una nueva pestaña' : 'Ver tablero: ingresar código de sala'}>
           <span>
             <Button
-              onClick={() => {
-                if (!roomCode) { setToast('No hay sala activa para abrir el tablero.'); return; }
-                const url = buildScreenUrl(roomCode);
-                window.open(url, '_blank', 'noopener');
-              }}
+              onClick={handleOpenBoard}
               variant="contained"
               startIcon={<TvIcon />}
-              disabled={!roomCode}
-              sx={{ ml: 1, color: 'primary.main', bgcolor: 'white', fontWeight: 'bold', '&:hover': { bgcolor: 'grey.100' } }}
+              sx={{
+                ml: 1,
+                color: 'primary.main',
+                bgcolor: 'white',
+                fontWeight: 'bold',
+                '&:hover': { bgcolor: 'grey.100' },
+              }}
               size={isXs ? 'small' : 'medium'}
             >
               {isXs ? '' : 'TABLERO'}
@@ -67,7 +83,7 @@ const HeaderBar: React.FC<{
           </span>
         </Tooltip>
 
-        {/* 👇 Solo aparece cuando el juego ya empezó o terminó */}
+        {/* Solo aparece cuando el juego ya empezó o terminó */}
         {connected && gameStarted && (
           <Tooltip title="Desconectarte de la sala">
             <Button
