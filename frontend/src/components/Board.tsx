@@ -2,7 +2,7 @@ import React from 'react';
 import { Box } from '@mui/material';
 
 export const Cell: React.FC<{ size: number; state: 'unknown' | 'hit' | 'miss' | 'ship' }> = ({ size, state }) => {
-  const bg = state === 'hit' ? '#d32f2f' : state === 'miss' ? '#90caf9' : state === 'ship' ? '#c8e6c9' : '#e0e0e0';
+  const bg = state === 'hit' ? '#d32f2f' : state === 'miss' ? '#90caf9' : state === 'ship' ? '#73a075ff' : '#e0e0e0';
   return <Box sx={{ width: size, height: size, bgcolor: bg, border: '1px solid rgba(215, 240, 244, 0.92)', borderRadius: 0.1 }} />;
 };
 
