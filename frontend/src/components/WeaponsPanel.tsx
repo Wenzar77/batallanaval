@@ -1,27 +1,47 @@
-import React from 'react';
-import { Stack, Chip, Alert } from '@mui/material';
-import RadarIcon from '@mui/icons-material/Radar';
-import WhatshotIcon from '@mui/icons-material/Whatshot';
-import AddchartIcon from '@mui/icons-material/Addchart';
-import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
+// src/components/WeaponsPanel.tsx
+import { Chip, Stack, Tooltip } from '@mui/material';
+import { WEAPON_DESCRIPTIONS, WEAPON_ICONS, WEAPON_ORDER } from '../utils/weapons';
 
-const iconFor = (w: string) => w === 'radar' ? <RadarIcon/> : w === 'bomb3x3' ? <WhatshotIcon/> : w === 'crossMissile' ? <AddchartIcon/> : <HelpOutlineIcon/>;
-
-const WeaponsPanel: React.FC<{
+type WeaponsPanelProps = {
   weaponCounts: Record<string, number>;
   weaponToUse: string | null;
   setWeaponToUse: (w: string | null) => void;
-}> = ({ weaponCounts, weaponToUse, setWeaponToUse }) => (
-  <>
+};
+
+export default function WeaponsPanel({
+  weaponCounts,
+  weaponToUse,
+  setWeaponToUse,
+}: WeaponsPanelProps) {
+  // Normaliza en un arreglo ordenado solo las armas con cantidad > 0
+  const entries = (WEAPON_ORDER.length ? WEAPON_ORDER : Object.keys(weaponCounts))
+    .map((k) => [k, weaponCounts[k] as number] as const)
+    .filter(([, count]) => (count ?? 0) > 0);
+
+  return (
     <Stack direction="row" spacing={1} flexWrap="wrap">
-      {Object.entries(weaponCounts).length === 0 && <Chip label="Sin armas" size="small"/>}
-      {Object.entries(weaponCounts).map(([w, count]) => (
-        <Chip key={w} clickable color={weaponToUse === w ? 'success' : 'primary'} onClick={() => setWeaponToUse(w)} label={`${w} x${count}`} icon={iconFor(w)} size="small" />
-      ))}
+      {entries.map(([weapon, count]) => {
+        const Icon = WEAPON_ICONS[weapon];
+        const desc = WEAPON_DESCRIPTIONS[weapon] ?? '';
+
+        return (
+          <Tooltip key={weapon} title={desc} arrow>
+            <Chip
+              icon={Icon ? <Icon fontSize="small" /> : undefined}
+              label={`${weapon} (${count})`}
+              color={weaponToUse === weapon ? 'primary' : 'default'}
+              onClick={() => setWeaponToUse(weaponToUse === weapon ? null : weapon)}
+              sx={{
+                cursor: 'pointer',
+                textTransform: 'none',
+                '& .MuiChip-icon': { ml: 0.25 }, // un pelín de respiro
+              }}
+              variant={weaponToUse === weapon ? 'filled' : 'outlined'}
+              size="small"
+            />
+          </Tooltip>
+        );
+      })}
     </Stack>
-    {weaponToUse && (
-      <Alert sx={{ mt: 2 }} severity="info">Arma seleccionada: <b>{weaponToUse}</b>. Toca el tablero para usarla.</Alert>
-    )}
-  </>
-);
-export default WeaponsPanel;
+  );
+}

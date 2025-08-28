@@ -381,7 +381,7 @@ export default function App() {
               </SectionCard>
 
               <SectionCard disabledStyling={gameOver} compact>
-                <Typography variant="h6" gutterBottom>Armas del equipo {team} ({teamNames[team]})</Typography>
+                <Typography variant="h6" gutterBottom>Armas del equipo {teamNames[team]}</Typography>
                 <WeaponsPanel weaponCounts={weaponCounts} weaponToUse={weaponToUse} setWeaponToUse={setWeaponToUse} />
               </SectionCard>
 
