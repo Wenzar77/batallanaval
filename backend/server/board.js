@@ -33,12 +33,39 @@ export function placeShipsRandomly() {
   return b;
 }
 
-export function coordsInBomb3x3(x, y) {
+/**
+ * Helper genérico para cuadrados:
+ * - size impar: centrado en (x,y)  ⇒ p.ej. 3x3 como tu bomb3x3
+ * - size par:   (x,y) es esquina superior izquierda ⇒ p.ej. 2x2
+ * Siempre recorta a los límites del tablero.
+ */
+export function coordsInSquare(x, y, size) {
   const c = [];
-  for (let i = x - 1; i <= x + 1; i++)
-    for (let j = y - 1; j <= y + 1; j++)
-      if (i >= 0 && i < SIZE && j >= 0 && j < SIZE) c.push([i, j]);
+  if (size % 2 === 1) {
+    const half = Math.floor(size / 2);
+    for (let i = x - half; i <= x + half; i++) {
+      for (let j = y - half; j <= y + half; j++) {
+        if (i >= 0 && i < SIZE && j >= 0 && j < SIZE) c.push([i, j]);
+      }
+    }
+  } else {
+    for (let i = x; i < x + size; i++) {
+      for (let j = y; j < y + size; j++) {
+        if (i >= 0 && i < SIZE && j >= 0 && j < SIZE) c.push([i, j]);
+      }
+    }
+  }
   return c;
+}
+
+// 3x3 centrado en (x,y) — conserva tu comportamiento actual
+export function coordsInBomb3x3(x, y) {
+  return coordsInSquare(x, y, 3);
+}
+
+// NUEVA: 2x2 con (x,y) como esquina superior izquierda
+export function coordsInBomb2x2(x, y) {
+  return coordsInSquare(x, y, 2);
 }
 
 export function coordsInCross(x, y) {

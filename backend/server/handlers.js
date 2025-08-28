@@ -12,7 +12,7 @@ import {
   PTS_HIT, PTS_SINK, PTS_TRIVIA
 } from './constants.js';
 import {
-  placeShipsRandomly, coordsInBomb3x3, coordsInCross, isShipSunk, countShipsRemaining
+  placeShipsRandomly, coordsInBomb3x3, coordsInCross, isShipSunk, countShipsRemaining, coordsInBomb2x2
 } from './board.js';
 
 export function handleMessage(ws, raw) {
@@ -185,9 +185,21 @@ export function handleMessage(ws, raw) {
     if (team !== room.turnTeam) { try { ws.send(JSON.stringify({ type: 'error', message: 'No es tu turno' })); } catch {} return; }
 
     const { x, y, weapon } = data;
+
+    // Validar arma si viene especificada: debe existir en inventario del equipo
+    if (weapon) {
+      const idx = room.weapons[team].indexOf(weapon);
+      if (idx === -1) {
+        try { ws.send(JSON.stringify({ type: 'toast', message: '❌ No tienes ese arma disponible' })); } catch {}
+        return;
+      }
+    }
+
+    // Calcular objetivos
     let targets = [[x, y]];
     if (weapon === 'bomb3x3') targets = coordsInBomb3x3(x, y);
-    if (weapon === 'crossMissile') targets = coordsInCross(x, y);
+    else if (weapon === 'crossMissile') targets = coordsInCross(x, y);
+    else if (weapon === 'bomb2x2') targets = coordsInBomb2x2(x, y);
 
     const enemy = team === 'A' ? 'B' : 'A';
     let anyHit = false;
@@ -208,7 +220,8 @@ export function handleMessage(ws, raw) {
       }
     }
 
-    if (weapon && weapon !== 'doubleShot') {
+    // Consumir arma si se usó
+    if (weapon) {
       const idx = room.weapons[team].indexOf(weapon);
       if (idx >= 0) room.weapons[team].splice(idx, 1);
     }
