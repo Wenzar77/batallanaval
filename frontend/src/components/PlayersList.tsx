@@ -13,7 +13,6 @@ import {
 import { alpha } from '@mui/material/styles';
 import type { Snapshot, Team } from '../types/game';
 import { TEAM_ICONS } from '../utils/fleet';
-import SportsEsportsIcon from '@mui/icons-material/SportsEsports';
 
 type Props = {
   snapshot: Snapshot;
@@ -27,13 +26,7 @@ type Props = {
 
 /** Intenta extraer todos los posibles identificadores de un jugador y compararlos como string */
 const playerMatchesId = (p: any, targetId: string) => {
-  const candidates = [
-    p?.id,
-    p?.clientId,
-    p?.sid,
-    p?.socketId,
-    p?.cid,
-  ]
+  const candidates = [p?.id, p?.clientId, p?.sid, p?.socketId, p?.cid]
     .filter(Boolean)
     .map((v: any) => String(v));
   return candidates.includes(String(targetId));
@@ -91,12 +84,11 @@ const TeamHeader: React.FC<{ team: Team; name: string; highlight?: boolean }> = 
 };
 
 const PlayersList: React.FC<Props> = ({ snapshot, activePlayerId, activeTeam, activePlayerName }) => {
-  const playersA = snapshot.players.filter((p) => p.team === 'A');
-  const playersB = snapshot.players.filter((p) => p.team === 'B');
+  const playersA = snapshot.players.filter((pl) => pl.team === 'A');
+  const playersB = snapshot.players.filter((pl) => pl.team === 'B');
   const teamNames = snapshot.teamNames;
 
   // --- LOCAL ANTI-FLICKER ---
-  // Guardamos el último id de jugador que SÍ pudimos mapear a un item visual.
   const lastActiveIdRef = useRef<string | null>(null);
   const lastActiveTeamRef = useRef<Team | null>(null);
 
@@ -104,21 +96,18 @@ const PlayersList: React.FC<Props> = ({ snapshot, activePlayerId, activeTeam, ac
   const exactActive = useMemo(() => {
     if (!activePlayerId) return null;
     const idStr = String(activePlayerId);
-    return snapshot.players.find((p) => playerMatchesId(p, idStr)) ?? null;
+    return snapshot.players.find((pl) => playerMatchesId(pl, idStr)) ?? null;
   }, [snapshot.players, activePlayerId]);
 
-  // Si hay match exacto, actualizamos los refs; si no hay, conservamos mientras el equipo en turno sea el mismo
+  // Si hay match exacto, actualizamos los refs; si no, conservamos mientras el equipo en turno sea el mismo
   useEffect(() => {
     if (exactActive) {
-      lastActiveIdRef.current = String(activePlayerId);
+      lastActiveIdRef.current = activePlayerId ? String(activePlayerId) : null;
       lastActiveTeamRef.current = exactActive.team as Team;
     } else {
-      // Si no encontramos jugador pero el equipo activo coincide con el último,
-      // mantenemos el último jugador para no perder el highlight 1-2 ticks.
       if (activeTeam && lastActiveTeamRef.current === activeTeam) {
-        // mantenemos refs
+        // mantener el último mientras no cambie el equipo
       } else {
-        // cambiaron de equipo o no hay info: limpiamos
         lastActiveIdRef.current = null;
         lastActiveTeamRef.current = activeTeam;
       }
@@ -127,7 +116,7 @@ const PlayersList: React.FC<Props> = ({ snapshot, activePlayerId, activeTeam, ac
 
   // Id que usaremos para marcar el item (exacto o último conocido si aplica)
   const effectiveActiveId: string | null = exactActive
-    ? String(activePlayerId)
+    ? (activePlayerId ? String(activePlayerId) : null)
     : lastActiveIdRef.current;
 
   // ¿No tenemos item a resaltar? entonces resaltamos el header del equipo
@@ -142,29 +131,30 @@ const PlayersList: React.FC<Props> = ({ snapshot, activePlayerId, activeTeam, ac
       <Box key={team} sx={{ mb: 1.5 }}>
         <TeamHeader team={team} name={teamNames[team]} highlight={shouldHighlightHeader(team)} />
         <List dense sx={{ py: 0 }}>
-          {group.map((p) => {
+          {group.map((pl) => {
             const isActive =
-              !!effectiveActiveId && playerMatchesId(p, effectiveActiveId);
+              !!effectiveActiveId && playerMatchesId(pl, effectiveActiveId);
 
             return (
               <ListItem
-                key={p.id}
+                key={pl.id}
                 aria-current={isActive ? 'true' : undefined}
                 secondaryAction={
                   isActive ? (
                     <Chip
                       size="small"
                       color={team === 'A' ? 'success' : 'info'}
-                      icon={<SportsEsportsIcon sx={{ fontSize: 16 }} />}
-                      label={`JUGANDO AHORA${(activePlayerName || p.name) ? ` · ${activePlayerName || p.name}` : ''}`}
-                      sx={{ fontWeight: 800, letterSpacing: 0.3 }}
+                      label={`JUGANDO AHORA${(activePlayerName || pl.name) ? ` · ${activePlayerName || pl.name}` : ''}`}
+                      sx={{ fontWeight: 800 }}
                     />
                   ) : undefined
                 }
                 sx={(theme) => ({
                   borderRadius: isActive ? 2 : 1.75,
                   mb: isActive ? 1 : 0.75,
-                  border: isActive ? `1.5px solid ${alpha(teamColorHex, 0.7)}` : `1px solid ${alpha(theme.palette.divider, 0.6)}`,
+                  border: isActive
+                    ? `1.5px solid ${alpha(teamColorHex, 0.7)}`
+                    : `1px solid ${alpha(theme.palette.divider, 0.6)}`,
                   background: isActive
                     ? `linear-gradient(135deg, ${alpha(teamColorHex, 0.18)}, ${alpha(teamColorHex, 0.07)})`
                     : alpha(theme.palette.background.paper, 0.6),
@@ -212,8 +202,8 @@ const PlayersList: React.FC<Props> = ({ snapshot, activePlayerId, activeTeam, ac
                 </ListItemAvatar>
 
                 <ListItemText
-                  primary={p.name || 'Jugador'}
-                  secondary={String(p.id ?? '').slice(0, 6)}
+                  primary={pl.name || 'Jugador'}
+                  secondary={String(pl.id ?? '').slice(0, 6)}
                   primaryTypographyProps={{
                     fontWeight: isActive ? 900 : 600,
                     sx: {
