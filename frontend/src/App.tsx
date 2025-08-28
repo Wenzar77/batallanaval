@@ -347,7 +347,15 @@ export default function App() {
   }
 
   return (
-    <>
+    <Box sx={{
+      width: "100vw",
+      height: "100vh",
+      backgroundImage: "url('/bg-ocean.png')",
+      backgroundSize: "cover",
+      backgroundColor: "#87ceeb",
+      backgroundPosition: "center",
+    }}
+    >
       <HeaderBar
         snapshot={snapshot}
         teamNames={teamNames}
@@ -358,7 +366,7 @@ export default function App() {
         onWatch={openWatchDialog}
       />
 
-      <Container sx={{ mt: 3, pb: 3 }}>
+      <Container sx={{ mt: 3, pb: 3 }} >
         {snapshot?.state === 'active' ? (
           <SectionCard compact>
             <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'flex-start', sm: 'center' }} justifyContent="space-between" spacing={1.5}>
@@ -512,6 +520,6 @@ export default function App() {
           <Button variant="contained" onClick={confirmWatch}>Ver</Button>
         </DialogActions>
       </Dialog>
-    </>
+    </Box>
   );
 }
