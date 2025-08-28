@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
 import {
-  Container, Stack, Typography, Chip, Divider, Snackbar, Alert, Box, Grid,
-  Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField
+  Container, Stack, Typography, Chip, Divider, Snackbar, Alert, Box,
+  Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField, Grid
 } from '@mui/material';
 import HeaderBar from './components/HeaderBar';
 import Lobby from './components/Lobby';
@@ -20,9 +20,6 @@ import { ensureTokenInURL, readQS, setQS, QS_CODE, QS_TOKEN } from './utils/url'
 import type { Snapshot, Team, TriviaMsg, TeamBreakdown } from './types/game';
 
 const isScreen = typeof window !== 'undefined' && window.location.pathname.endsWith('/screen');
-
-
-
 
 export default function App() {
   const { cellSize, boardScrollMaxW } = useResponsiveBoard();
@@ -45,6 +42,52 @@ export default function App() {
   type PendingShot = { x: number; y: number; weapon?: string | null; nonce?: string };
   const [pendingShot, setPendingShot] = useState<PendingShot | null>(null);
 
+  const [weaponToUse, setWeaponToUse] = useState<string | null>(null);
+  const [doubleShotPending, setDoubleShotPending] = useState<number>(0);
+  const [mode, setMode] = useState<'crear' | 'unirme'>('crear');
+  const [myFleetCells, setMyFleetCells] = useState<string[] | null>(null);
+
+  // Diálogo para "Ver tablero"
+  const [askCodeOpen, setAskCodeOpen] = useState(false);
+  const [inputCode, setInputCode] = useState<string>('');
+
+  const wasActiveRef = useRef(false);
+
+  const leaveGame = () => {
+    if (!ws) return;
+    ws.send(JSON.stringify({ type: 'leaveRoom' }));
+    setSnapshot(null); setIsHost(false); setCode(''); setMode('crear');
+    setQS({ [QS_CODE]: null, [QS_TOKEN]: null });
+  };
+
+  const teamNames = snapshot?.teamNames ?? DEFAULT_TEAM_NAMES;
+  const enemyTeam: Team = team === 'A' ? 'B' : 'A';
+
+  // Jugador en turno (cálculo robusto)
+  const activeId = useMemo(() => {
+    if (!snapshot?.turnPlayerId) return null;
+    return String(snapshot.turnPlayerId);
+  }, [snapshot?.turnPlayerId]);
+
+  const activePlayer = useMemo(() => {
+    if (!snapshot || !activeId) return null;
+    return (
+      snapshot.players.find(p => String(p.id) === activeId) ||
+      // segundo intento por clientId si tu modelo de jugador lo trae
+      (snapshot.players as any).find?.((p: any) => p.clientId && String(p.clientId) === activeId) ||
+      null
+    );
+  }, [snapshot, activeId]);
+
+  const activePlayerName = useMemo(() => {
+    return activePlayer?.name ?? (snapshot as any)?.turnPlayerName ?? null;
+  }, [activePlayer, snapshot]);
+
+  const activeTeam = snapshot?.turnTeam ?? null;
+
+  const turnPlayer = activePlayer ?? (snapshot?.turnPlayerId ? snapshot.players.find(p => p.id === snapshot.turnPlayerId) : undefined) ?? undefined;
+  const turnPlayerName = activePlayerName ?? turnPlayer?.name ?? null;
+
   const actuallyFire = (i: number, j: number, weapon?: string | null) => {
     if (!ws || !myTurn) return;
     ws.send(JSON.stringify({ type: 'fire', x: i, y: j, weapon: weapon || undefined }));
@@ -60,45 +103,21 @@ export default function App() {
     }
   };
 
-
-  const [weaponToUse, setWeaponToUse] = useState<string | null>(null);
-  const [doubleShotPending, setDoubleShotPending] = useState<number>(0);
-  const [mode, setMode] = useState<'crear' | 'unirme'>('crear');
-  const [myFleetCells, setMyFleetCells] = useState<string[] | null>(null);
-
-  // --- NUEVO: diálogo para pedir el código al presionar "Ver tablero"
-  const [askCodeOpen, setAskCodeOpen] = useState(false);
-  const [inputCode, setInputCode] = useState<string>('');
-
-  const wasActiveRef = useRef(false);
-  const leaveGame = () => {
-    if (!ws) return;
-    ws.send(JSON.stringify({ type: 'leaveRoom' }));
-    setSnapshot(null); setIsHost(false); setCode(''); setMode('crear');
-    setQS({ [QS_CODE]: null, [QS_TOKEN]: null });
-  };
-
-  const teamNames = snapshot?.teamNames ?? DEFAULT_TEAM_NAMES;
-  const enemyTeam: Team = team === 'A' ? 'B' : 'A';
-  const turnPlayer = snapshot?.turnPlayerId ? snapshot.players.find(p => p.id === snapshot.turnPlayerId) : undefined;
-  const turnPlayerName = turnPlayer?.name ?? null;
-
   const fireAt = (i: number, j: number) => {
     if (!ws || !myTurn) return;
     const weapon = weaponToUse || undefined;
 
-    // Si hay una trivia y me toca responder, NO dispares aún:
+    // Si hay trivia y me toca responder, NO dispares aún:
     if (trivia && trivia.canAnswer) {
       setPendingShot({ x: i, y: j, weapon, nonce: (trivia as any).nonce });
       setToast('Primero responde la trivia para poder disparar.');
       return;
     }
 
-    // Si no hay trivia activa para mí, dispara normal
     actuallyFire(i, j, weapon);
   };
 
-
+  // Conexión WS
   useEffect(() => {
     const wsUrl = (import.meta.env.VITE_WS_URL as string) || 'ws://localhost:3000/ws';
     let socket: WebSocket | null = null; let retry = 0; let closedByUs = false; let gotFirstSnapshot = false;
@@ -133,7 +152,7 @@ export default function App() {
         // Pide mi flota (si aplica)
         setTimeout(() => { try { socket?.send(JSON.stringify({ type: 'requestMyFleet' })); } catch { } }, 800);
 
-        // Modo pantalla (ruta /screen) -> observar sala por código en URL
+        // Modo pantalla (/screen): observar
         if (isScreen) {
           const qs2 = new URL(window.location.href).searchParams;
           const urlCode2 = (qs2.get('code') ?? '').toUpperCase();
@@ -159,20 +178,17 @@ export default function App() {
         }
 
         if (data.type === 'toast') setToast(data.message);
+
         if (data.type === 'trivia') {
           setTrivia(data);
-
-          // Opcional: si llega una trivia nueva con otro nonce, descarta un tiro pendiente anterior
+          // Si llega una trivia nueva con otro nonce, descarta un tiro pendiente anterior
           if (pendingShot && pendingShot.nonce && pendingShot.nonce !== data.nonce) {
             setPendingShot(null);
           }
         }
 
         if (data.type === 'triviaEnd') {
-          // Muchos servidores envían info de acierto. Intentamos detectar:
-          // - data.correct === true
-          // - o data.winnerClientId coincide con mi clientId
-          // Si no viene nada, asumimos "NO disparar" (comportamiento seguro).
+          // Detectar acierto posible
           const correct =
             (typeof data.correct === 'boolean' ? data.correct : undefined) ??
             (data.winnerClientId ? data.winnerClientId === clientId : undefined) ??
@@ -181,10 +197,8 @@ export default function App() {
           // Si tengo un tiro pendiente y coincide (si hay nonce), decide
           if (pendingShot && (!data.nonce || !pendingShot.nonce || data.nonce === pendingShot.nonce)) {
             if (correct) {
-              // Dispara ahora
               actuallyFire(pendingShot.x, pendingShot.y, pendingShot.weapon);
             } else {
-              // Falló la trivia → NO disparamos
               setToast('Respuesta incorrecta. Se cancela el disparo.');
             }
             setPendingShot(null);
@@ -201,12 +215,11 @@ export default function App() {
         if (data.type === 'myFleetCells' && Array.isArray(data.cells)) setMyFleetCells(data.cells);
         if (data.type === 'playerBoard' && Array.isArray(data.shipCells)) setMyFleetCells(data.shipCells);
 
-        const isActive = data.snapshot?.state === 'active';
-        if (isActive && !wasActiveRef.current) {
+        const active = data.snapshot?.state === 'active';
+        if (active && !wasActiveRef.current) {
           wasActiveRef.current = true;
           try { ws?.send(JSON.stringify({ type: 'requestMyFleet' })); } catch { }
         }
-
       };
 
       socket.onclose = () => {
@@ -257,7 +270,6 @@ export default function App() {
     ws.send(JSON.stringify({ type: 'joinRoom', code, name: name || 'Jugador', team, clientId: token }));
   };
 
-  // 🔁 Reemplaza SOLO esta función
   const startGame = () => {
     if (!ws) return;
 
@@ -310,7 +322,7 @@ export default function App() {
     ]).sort((a, b) => b.points - a.points);
   }, [snapshot, teamBreakdown]);
 
-  // --- Handlers del botón "Ver tablero"
+  // Handlers del botón "Ver tablero"
   const openWatchDialog = () => {
     setInputCode(code || '');
     setAskCodeOpen(true);
@@ -331,7 +343,7 @@ export default function App() {
         snapshot={snapshot}
         teamNames={teamNames}
         teamIcons={TEAM_ICONS}
-        activePlayerId={snapshot.turnPlayerId ?? null}
+        activePlayerId={activeId}
       />
     );
   }
@@ -345,9 +357,8 @@ export default function App() {
         connected={connected}
         onLeave={leaveGame}
         setToast={setToast}
-        onWatch={openWatchDialog}   // 👈 aquí
+        onWatch={openWatchDialog}
       />
-
 
       <Container sx={{ mt: 3, pb: 3 }}>
         {snapshot?.state === 'active' ? (
@@ -362,7 +373,7 @@ export default function App() {
         ) : (
           <SectionCard compact>
             <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'flex-start', sm: 'center' }} justifyContent="space-between" spacing={1.5}>
-              <Typography variant="subtitle1">Lobby</Typography>              
+              <Typography variant="subtitle1">Lobby</Typography>
             </Stack>
 
             <Box mt={1.5}>
@@ -404,7 +415,7 @@ export default function App() {
                     hits={hitsEnemy}
                     misses={missesEnemy}
                     onClick={fireAt}
-                    disabled={!myTurn || gameOver || !!pendingShot}   // 👈 agrega esta condición si te gusta
+                    disabled={!myTurn || gameOver || !!pendingShot}
                     cellSize={cellSize}
                   />
                 </Box>
@@ -444,7 +455,9 @@ export default function App() {
 
               <SectionCard compact>
                 <Typography variant="h6" gutterBottom>Jugadores</Typography>
-                <PlayersList snapshot={snapshot} />
+                <PlayersList
+                  snapshot={snapshot}                                    
+                />
               </SectionCard>
             </Grid>
           </Grid>
