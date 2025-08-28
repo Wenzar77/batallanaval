@@ -1,5 +1,5 @@
 // src/components/PlayersList.tsx
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef, useEffect } from 'react';
 import {
   Box,
   List,
@@ -13,9 +13,30 @@ import {
 import { alpha } from '@mui/material/styles';
 import type { Snapshot, Team } from '../types/game';
 import { TEAM_ICONS } from '../utils/fleet';
+import SportsEsportsIcon from '@mui/icons-material/SportsEsports';
 
 type Props = {
   snapshot: Snapshot;
+  /** Id activo tal como lo manda el server (ej: snapshot.turnPlayerId) */
+  activePlayerId: string | null;
+  /** Equipo en turno (fallback visual) */
+  activeTeam: Team | null;
+  /** Nombre del jugador activo (si lo tienes) */
+  activePlayerName?: string | null;
+};
+
+/** Intenta extraer todos los posibles identificadores de un jugador y compararlos como string */
+const playerMatchesId = (p: any, targetId: string) => {
+  const candidates = [
+    p?.id,
+    p?.clientId,
+    p?.sid,
+    p?.socketId,
+    p?.cid,
+  ]
+    .filter(Boolean)
+    .map((v: any) => String(v));
+  return candidates.includes(String(targetId));
 };
 
 const TeamHeader: React.FC<{ team: Team; name: string; highlight?: boolean }> = ({ team, name, highlight }) => {
@@ -69,41 +90,62 @@ const TeamHeader: React.FC<{ team: Team; name: string; highlight?: boolean }> = 
   );
 };
 
-const PlayersList: React.FC<Props> = ({ snapshot }) => {
-  const turnId = snapshot.turnPlayerId ?? null;
-  const turnTeam = snapshot.turnTeam ?? null;
-
+const PlayersList: React.FC<Props> = ({ snapshot, activePlayerId, activeTeam, activePlayerName }) => {
   const playersA = snapshot.players.filter((p) => p.team === 'A');
   const playersB = snapshot.players.filter((p) => p.team === 'B');
-
-  // Jugador activo robusto: por id, luego clientId, luego nombre (si el server lo manda)
-  const activePlayer = useMemo(() => {
-    if (!turnId) return null;
-    const target = String(turnId);
-    const byId =
-      snapshot.players.find((p: any) => String(p.id) === target) ??
-      snapshot.players.find((p: any) => p.clientId && String(p.clientId) === target);
-    if (byId) return byId;
-    const possibleName = (snapshot as any).turnPlayerName as string | undefined;
-    if (possibleName) {
-      return snapshot.players.find((p) => (p.name ?? '').trim() === possibleName.trim()) ?? null;
-    }
-    return null;
-  }, [snapshot.players, turnId, snapshot]);
-
   const teamNames = snapshot.teamNames;
 
+  // --- LOCAL ANTI-FLICKER ---
+  // Guardamos el último id de jugador que SÍ pudimos mapear a un item visual.
+  const lastActiveIdRef = useRef<string | null>(null);
+  const lastActiveTeamRef = useRef<Team | null>(null);
+
+  // Intento de match exacto en este render:
+  const exactActive = useMemo(() => {
+    if (!activePlayerId) return null;
+    const idStr = String(activePlayerId);
+    return snapshot.players.find((p) => playerMatchesId(p, idStr)) ?? null;
+  }, [snapshot.players, activePlayerId]);
+
+  // Si hay match exacto, actualizamos los refs; si no hay, conservamos mientras el equipo en turno sea el mismo
+  useEffect(() => {
+    if (exactActive) {
+      lastActiveIdRef.current = String(activePlayerId);
+      lastActiveTeamRef.current = exactActive.team as Team;
+    } else {
+      // Si no encontramos jugador pero el equipo activo coincide con el último,
+      // mantenemos el último jugador para no perder el highlight 1-2 ticks.
+      if (activeTeam && lastActiveTeamRef.current === activeTeam) {
+        // mantenemos refs
+      } else {
+        // cambiaron de equipo o no hay info: limpiamos
+        lastActiveIdRef.current = null;
+        lastActiveTeamRef.current = activeTeam;
+      }
+    }
+  }, [exactActive, activePlayerId, activeTeam]);
+
+  // Id que usaremos para marcar el item (exacto o último conocido si aplica)
+  const effectiveActiveId: string | null = exactActive
+    ? String(activePlayerId)
+    : lastActiveIdRef.current;
+
+  // ¿No tenemos item a resaltar? entonces resaltamos el header del equipo
+  const shouldHighlightHeader = (team: Team) =>
+    !effectiveActiveId && !!activeTeam && activeTeam === team;
+
   const renderGroup = (team: Team, group: typeof snapshot.players) => {
-    const teamColor = team === 'A' ? '#2e7d32' : '#0277bd';
-    const teamMUIColor = team === 'A' ? 'success.main' : 'info.main';
-    const highlightTeamHeader = !activePlayer && !!turnTeam && turnTeam === team;
+    const teamColorHex = team === 'A' ? '#2e7d32' : '#0277bd';
+    const teamMuiColor = team === 'A' ? 'success.main' : 'info.main';
 
     return (
       <Box key={team} sx={{ mb: 1.5 }}>
-        <TeamHeader team={team} name={teamNames[team]} highlight={highlightTeamHeader} />
+        <TeamHeader team={team} name={teamNames[team]} highlight={shouldHighlightHeader(team)} />
         <List dense sx={{ py: 0 }}>
           {group.map((p) => {
-            const isActive = !!activePlayer && p.id === activePlayer.id;
+            const isActive =
+              !!effectiveActiveId && playerMatchesId(p, effectiveActiveId);
+
             return (
               <ListItem
                 key={p.id}
@@ -113,20 +155,21 @@ const PlayersList: React.FC<Props> = ({ snapshot }) => {
                     <Chip
                       size="small"
                       color={team === 'A' ? 'success' : 'info'}
-                      label={`En turno${p.name ? ` · ${p.name}` : ''}`}
-                      sx={{ fontWeight: 700 }}
+                      icon={<SportsEsportsIcon sx={{ fontSize: 16 }} />}
+                      label={`JUGANDO AHORA${(activePlayerName || p.name) ? ` · ${activePlayerName || p.name}` : ''}`}
+                      sx={{ fontWeight: 800, letterSpacing: 0.3 }}
                     />
                   ) : undefined
                 }
                 sx={(theme) => ({
                   borderRadius: isActive ? 2 : 1.75,
                   mb: isActive ? 1 : 0.75,
-                  border: isActive ? `1.5px solid ${alpha(teamColor, 0.7)}` : `1px solid ${alpha(theme.palette.divider, 0.6)}`,
+                  border: isActive ? `1.5px solid ${alpha(teamColorHex, 0.7)}` : `1px solid ${alpha(theme.palette.divider, 0.6)}`,
                   background: isActive
-                    ? `linear-gradient(135deg, ${alpha(teamColor, 0.16)}, ${alpha(teamColor, 0.06)})`
+                    ? `linear-gradient(135deg, ${alpha(teamColorHex, 0.18)}, ${alpha(teamColorHex, 0.07)})`
                     : alpha(theme.palette.background.paper, 0.6),
                   boxShadow: isActive
-                    ? `0 0 0 2px ${alpha(teamColor, 0.12)} inset, 0 8px 24px ${alpha(teamColor, 0.22)}`
+                    ? `0 0 0 2px ${alpha(teamColorHex, 0.12)} inset, 0 8px 24px ${alpha(teamColorHex, 0.22)}`
                     : 'none',
                   backdropFilter: 'blur(4px)',
                   position: 'relative',
@@ -138,7 +181,7 @@ const PlayersList: React.FC<Props> = ({ snapshot }) => {
                         inset: -2,
                         borderRadius: 18,
                         padding: 2,
-                        background: `linear-gradient(135deg, ${alpha(teamColor, 0.6)}, ${alpha(teamColor, 0.1)}, ${alpha(teamColor, 0.6)})`,
+                        background: `linear-gradient(135deg, ${alpha(teamColorHex, 0.6)}, ${alpha(teamColorHex, 0.1)}, ${alpha(teamColorHex, 0.6)})`,
                         WebkitMask: 'linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)',
                         WebkitMaskComposite: 'xor',
                         maskComposite: 'exclude',
@@ -156,10 +199,10 @@ const PlayersList: React.FC<Props> = ({ snapshot }) => {
                   <Tooltip title={isActive ? 'Jugador en turno' : 'Jugador'}>
                     <Avatar
                       sx={{
-                        bgcolor: isActive ? alpha(teamColor, 0.15) : 'background.paper',
-                        color: teamMUIColor,
-                        border: isActive ? `2px solid ${teamColor}` : `1px solid`,
-                        borderColor: isActive ? alpha(teamColor, 0.7) : 'divider',
+                        bgcolor: isActive ? alpha(teamColorHex, 0.15) : 'background.paper',
+                        color: teamMuiColor,
+                        border: isActive ? `2px solid ${teamColorHex}` : `1px solid`,
+                        borderColor: isActive ? alpha(teamColorHex, 0.7) : 'divider',
                         fontWeight: 700,
                       }}
                     >
@@ -172,10 +215,10 @@ const PlayersList: React.FC<Props> = ({ snapshot }) => {
                   primary={p.name || 'Jugador'}
                   secondary={String(p.id ?? '').slice(0, 6)}
                   primaryTypographyProps={{
-                    fontWeight: isActive ? 800 : 600,
+                    fontWeight: isActive ? 900 : 600,
                     sx: {
                       letterSpacing: 0.2,
-                      color: isActive ? teamMUIColor : 'text.primary',
+                      color: isActive ? teamMuiColor : 'text.primary',
                     },
                   }}
                   secondaryTypographyProps={{

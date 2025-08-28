@@ -63,27 +63,25 @@ export default function App() {
   const teamNames = snapshot?.teamNames ?? DEFAULT_TEAM_NAMES;
   const enemyTeam: Team = team === 'A' ? 'B' : 'A';
 
-  // Jugador en turno (cálculo robusto)
-  const activeId = useMemo(() => {
-    if (!snapshot?.turnPlayerId) return null;
-    return String(snapshot.turnPlayerId);
-  }, [snapshot?.turnPlayerId]);
 
+  // Jugador en turno (cálculo robusto) 
+  const activeId = useMemo(() => { if (!snapshot?.turnPlayerId) return null; return String(snapshot.turnPlayerId); }, [snapshot?.turnPlayerId]);
+  // Buscar al jugador activo de forma robusta (id o clientId)
   const activePlayer = useMemo(() => {
     if (!snapshot || !activeId) return null;
     return (
       snapshot.players.find(p => String(p.id) === activeId) ||
-      // segundo intento por clientId si tu modelo de jugador lo trae
       (snapshot.players as any).find?.((p: any) => p.clientId && String(p.clientId) === activeId) ||
       null
     );
   }, [snapshot, activeId]);
 
-  const activePlayerName = useMemo(() => {
-    return activePlayer?.name ?? (snapshot as any)?.turnPlayerName ?? null;
-  }, [activePlayer, snapshot]);
 
   const activeTeam = snapshot?.turnTeam ?? null;
+  const activePlayerName =
+    snapshot?.players.find(p => String(p.id) === String(snapshot.turnPlayerId))?.name
+    ?? (snapshot as any)?.turnPlayerName
+    ?? null;
 
   const turnPlayer = activePlayer ?? (snapshot?.turnPlayerId ? snapshot.players.find(p => p.id === snapshot.turnPlayerId) : undefined) ?? undefined;
   const turnPlayerName = activePlayerName ?? turnPlayer?.name ?? null;
@@ -456,7 +454,10 @@ export default function App() {
               <SectionCard compact>
                 <Typography variant="h6" gutterBottom>Jugadores</Typography>
                 <PlayersList
-                  snapshot={snapshot}                                    
+                  snapshot={snapshot}
+                  activePlayerId={activeId}
+                  activeTeam={activeTeam}
+                  activePlayerName={activePlayerName}
                 />
               </SectionCard>
             </Grid>
