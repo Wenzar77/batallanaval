@@ -41,6 +41,26 @@ export default function App() {
   const [isHost, setIsHost] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [trivia, setTrivia] = useState<TriviaMsg | null>(null);
+
+  type PendingShot = { x: number; y: number; weapon?: string | null; nonce?: string };
+  const [pendingShot, setPendingShot] = useState<PendingShot | null>(null);
+
+  const actuallyFire = (i: number, j: number, weapon?: string | null) => {
+    if (!ws || !myTurn) return;
+    ws.send(JSON.stringify({ type: 'fire', x: i, y: j, weapon: weapon || undefined }));
+
+    if (weapon === 'doubleShot') {
+      if (doubleShotPending === 0) setDoubleShotPending(1);
+      else {
+        setDoubleShotPending(0);
+        setWeaponToUse(null);
+      }
+    } else {
+      setWeaponToUse(null);
+    }
+  };
+
+
   const [weaponToUse, setWeaponToUse] = useState<string | null>(null);
   const [doubleShotPending, setDoubleShotPending] = useState<number>(0);
   const [mode, setMode] = useState<'crear' | 'unirme'>('crear');
@@ -66,17 +86,18 @@ export default function App() {
   const fireAt = (i: number, j: number) => {
     if (!ws || !myTurn) return;
     const weapon = weaponToUse || undefined;
-    ws.send(JSON.stringify({ type: 'fire', x: i, y: j, weapon }));
-    if (weapon === 'doubleShot') {
-      if (doubleShotPending === 0) setDoubleShotPending(1);
-      else {
-        setDoubleShotPending(0);
-        setWeaponToUse(null);
-      }
-    } else {
-      setWeaponToUse(null);
+
+    // Si hay una trivia y me toca responder, NO dispares aún:
+    if (trivia && trivia.canAnswer) {
+      setPendingShot({ x: i, y: j, weapon, nonce: (trivia as any).nonce });
+      setToast('Primero responde la trivia para poder disparar.');
+      return;
     }
+
+    // Si no hay trivia activa para mí, dispara normal
+    actuallyFire(i, j, weapon);
   };
+
 
   useEffect(() => {
     const wsUrl = (import.meta.env.VITE_WS_URL as string) || 'ws://localhost:3000/ws';
@@ -138,8 +159,39 @@ export default function App() {
         }
 
         if (data.type === 'toast') setToast(data.message);
-        if (data.type === 'trivia') setTrivia(data);
-        if (data.type === 'triviaEnd') setTrivia(null);
+        if (data.type === 'trivia') {
+          setTrivia(data);
+
+          // Opcional: si llega una trivia nueva con otro nonce, descarta un tiro pendiente anterior
+          if (pendingShot && pendingShot.nonce && pendingShot.nonce !== data.nonce) {
+            setPendingShot(null);
+          }
+        }
+
+        if (data.type === 'triviaEnd') {
+          // Muchos servidores envían info de acierto. Intentamos detectar:
+          // - data.correct === true
+          // - o data.winnerClientId coincide con mi clientId
+          // Si no viene nada, asumimos "NO disparar" (comportamiento seguro).
+          const correct =
+            (typeof data.correct === 'boolean' ? data.correct : undefined) ??
+            (data.winnerClientId ? data.winnerClientId === clientId : undefined) ??
+            false;
+
+          // Si tengo un tiro pendiente y coincide (si hay nonce), decide
+          if (pendingShot && (!data.nonce || !pendingShot.nonce || data.nonce === pendingShot.nonce)) {
+            if (correct) {
+              // Dispara ahora
+              actuallyFire(pendingShot.x, pendingShot.y, pendingShot.weapon);
+            } else {
+              // Falló la trivia → NO disparamos
+              setToast('Respuesta incorrecta. Se cancela el disparo.');
+            }
+            setPendingShot(null);
+          }
+
+          setTrivia(null);
+        }
 
         if (data.type === 'left') {
           setSnapshot(null); setIsHost(false); setCode(''); setMode('crear');
@@ -349,7 +401,14 @@ export default function App() {
                   </Stack>
                 </Stack>
                 <Box sx={{ mt: 2, overflowX: 'auto', overflowY: 'hidden', WebkitOverflowScrolling: 'touch', maxWidth: boardScrollMaxW, pb: 1 }}>
-                  <GridBoard size={SIZE} hits={hitsEnemy} misses={missesEnemy} onClick={fireAt} disabled={!myTurn || gameOver} cellSize={cellSize} />
+                  <GridBoard
+                    size={SIZE}
+                    hits={hitsEnemy}
+                    misses={missesEnemy}
+                    onClick={fireAt}
+                    disabled={!myTurn || gameOver || !!pendingShot}   // 👈 agrega esta condición si te gusta
+                    cellSize={cellSize}
+                  />
                 </Box>
               </SectionCard>
 
