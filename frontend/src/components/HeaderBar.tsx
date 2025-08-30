@@ -1,4 +1,4 @@
-import { AppBar, Toolbar, Typography, Chip, Avatar, Button, Tooltip } from '@mui/material';
+import { AppBar, Toolbar, Typography, Chip, Avatar, Button, Tooltip, Box } from '@mui/material';
 import TvIcon from '@mui/icons-material/Tv';
 import PowerSettingsNewIcon from '@mui/icons-material/PowerSettingsNew';
 import React from 'react';
@@ -44,61 +44,57 @@ const HeaderBar: React.FC<{
   return (
     <AppBar position="sticky" color="primary" enableColorOnDark>
       <Toolbar sx={{ minHeight: isXs ? 56 : 64 }}>
-        <Typography
-          variant={isXs ? 'subtitle1' : 'h6'}
-          sx={{ flexGrow: 1, display: 'flex', alignItems: 'center', gap: 1, overflow: 'hidden' }}
-        >
-          <Avatar sx={{ width: 28, height: 28, fontSize: 18 }}>{TEAM_ICONS.A}</Avatar>
-          <b style={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>{teamNames.A}</b>
-          <span style={{ opacity: 0.7, margin: '0 6px' }}>vs</span>
-          <Avatar sx={{ width: 28, height: 28, fontSize: 18 }}>{TEAM_ICONS.B}</Avatar>
-          <b style={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>{teamNames.B}</b>
+        <Typography>
+          Batalla Naval
         </Typography>
 
-        <Chip
-          color={connected ? 'success' : 'error'}
-          label={connected ? 'WS conectado' : 'WS desconectado'}
-          size={isXs ? 'small' : 'medium'}
-          sx={{ mr: 1, maxWidth: isXs ? 140 : 'unset' }}
-        />
+        <Box sx={{textAlign: 'right', flexGrow: 1}}>
 
-        {/* 👇 Botón TABLERO ahora sí renderizado */}
-        <Tooltip title={roomCode ? 'Abrir tablero en una nueva pestaña' : 'Ver tablero: ingresar código de sala'}>
-          <span>
-            <Button
-              onClick={handleOpenBoard}
-              variant="contained"
-              startIcon={<TvIcon />}
-              sx={{
-                ml: 1,
-                color: 'primary.main',
-                bgcolor: 'white',
-                fontWeight: 'bold',
-                '&:hover': { bgcolor: 'grey.100' },
-              }}
-              size={isXs ? 'small' : 'medium'}
-            >
-              {isXs ? '' : 'TABLERO'}
-            </Button>
-          </span>
-        </Tooltip>
+          <Chip
+            color={connected ? 'success' : 'error'}
+            label={connected ? 'WS conectado' : 'WS desconectado'}
+            size={isXs ? 'small' : 'medium'}
+            sx={{ mr: 1, maxWidth: isXs ? 140 : 'unset' }}
+          />
 
-        {/* Solo aparece cuando el juego ya empezó o terminó */}
-        {connected && gameStarted && (
-          <Tooltip title="Desconectarte de la sala">
-            <Button
-              onClick={onLeave}
-              color="error"
-              variant="contained"
-              startIcon={<PowerSettingsNewIcon />}
-              sx={{ ml: 1, bgcolor: 'white', color: 'error.main', fontWeight: 'bold', '&:hover': { bgcolor: 'grey.100' } }}
-              size={isXs ? 'small' : 'medium'}
-              aria-label="Desconectar"
-            >
-              {isXs ? '' : 'DESCONECTAR'}
-            </Button>
+          {/* 👇 Botón TABLERO ahora sí renderizado */}
+          <Tooltip title={roomCode ? 'Abrir tablero en una nueva pestaña' : 'Ver tablero: ingresar código de sala'}>
+            <span>
+              <Button
+                onClick={handleOpenBoard}
+                variant="contained"
+                startIcon={<TvIcon />}
+                sx={{
+                  ml: 1,
+                  color: 'primary.main',
+                  bgcolor: 'white',
+                  fontWeight: 'bold',
+                  '&:hover': { bgcolor: 'grey.100' },
+                }}
+                size={isXs ? 'small' : 'medium'}
+              >
+                {isXs ? '' : 'TABLERO'}
+              </Button>
+            </span>
           </Tooltip>
-        )}
+
+          {/* Solo aparece cuando el juego ya empezó o terminó */}
+          {connected && gameStarted && (
+            <Tooltip title="Desconectarte de la sala">
+              <Button
+                onClick={onLeave}
+                color="error"
+                variant="contained"
+                startIcon={<PowerSettingsNewIcon />}
+                sx={{ ml: 1, bgcolor: 'white', color: 'error.main', fontWeight: 'bold', '&:hover': { bgcolor: 'grey.100' } }}
+                size={isXs ? 'small' : 'medium'}
+                aria-label="Desconectar"
+              >
+                {isXs ? '' : 'DESCONECTAR'}
+              </Button>
+            </Tooltip>
+          )}
+        </Box>
       </Toolbar>
     </AppBar>
   );

@@ -437,10 +437,7 @@ export default function App() {
       <Container sx={{ mt: 3, pb: 3 }}>
         {/* ✅ Fase solo-lobby tras crear sala */}
         {showOnlyLobby && !isActiveGame ? (
-          <SectionCard compact>
-            <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'flex-start', sm: 'center' }} justifyContent="space-between" spacing={1.5}>
-              <Typography variant="subtitle1">Lobby</Typography>
-            </Stack>
+          <SectionCard compact>            
             <Box mt={1.5}>
               <Lobby
                 name={name} setName={setName}
@@ -478,10 +475,7 @@ export default function App() {
                 </Stack>
               </SectionCard>
             ) : (
-              <SectionCard compact>
-                <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'flex-start', sm: 'center' }} justifyContent="space-between" spacing={1.5}>
-                  <Typography variant="subtitle1">Lobby</Typography>
-                </Stack>
+              <SectionCard compact>                
                 <Box mt={1.5}>
                   <Lobby
                     name={name} setName={setName}
