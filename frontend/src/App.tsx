@@ -51,7 +51,7 @@ export default function App() {
 
   const [pendingShot, setPendingShot] = useState<PendingShot | null>(null);
   const [weaponToUse, setWeaponToUse] = useState<string | null>(null);
-  const [doubleShotPending, setDoubleShotPending] = useState<number>(0);
+  const [setDoubleShotPending] = useState<number>(0);
   const [mode, setMode] = useState<'crear' | 'unirme'>('crear');
   const [myFleetCells, setMyFleetCells] = useState<string[] | null>(null);
 
