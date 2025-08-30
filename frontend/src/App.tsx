@@ -153,16 +153,7 @@ export default function App() {
   const actuallyFire = useCallback((i: number, j: number, weapon?: string | null) => {
     if (!ws || !myTurn) return;
     ws.send(JSON.stringify({ type: 'fire', x: i, y: j, weapon: weapon || undefined }));
-
-    if (weapon === 'doubleShot') {
-      setDoubleShotPending(prev => {
-        if (prev === 0) return 1;
-        setWeaponToUse(null);
-        return 0;
-      });
-    } else {
-      setWeaponToUse(null);
-    }
+    setWeaponToUse(null);
   }, [ws, myTurn]);
 
   const fireAt = useCallback((i: number, j: number) => {
