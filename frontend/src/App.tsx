@@ -18,6 +18,7 @@ import { useResponsiveBoard } from './hooks/useResponsive';
 import { SIZE, DEFAULT_TEAM_NAMES, TEAM_ICONS, getTeamShipCells, FLEET_TOTAL_SHIPS } from './utils/fleet';
 import { ensureTokenInURL, readQS, setQS, QS_CODE, QS_TOKEN } from './utils/url';
 import type { Snapshot, Team, TriviaMsg, TeamBreakdown } from './types/game';
+import TeamLobbyPanel from './components/TeamLobbyPanel';
 
 const isScreen = typeof window !== 'undefined' && window.location.pathname.endsWith('/screen');
 
@@ -38,6 +39,8 @@ export default function App() {
   const [isHost, setIsHost] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [trivia, setTrivia] = useState<TriviaMsg | null>(null);
+  const [showOnlyLobby, setShowOnlyLobby] = useState(false);
+
 
   type PendingShot = { x: number; y: number; weapon?: string | null; nonce?: string };
   const [pendingShot, setPendingShot] = useState<PendingShot | null>(null);
@@ -58,15 +61,18 @@ export default function App() {
     ws.send(JSON.stringify({ type: 'leaveRoom' }));
     setSnapshot(null); setIsHost(false); setCode(''); setMode('crear');
     setQS({ [QS_CODE]: null, [QS_TOKEN]: null });
+    setShowOnlyLobby(false); // ✅ salir cancela el modo solo-lobby
   };
 
   const teamNames = snapshot?.teamNames ?? DEFAULT_TEAM_NAMES;
   const enemyTeam: Team = team === 'A' ? 'B' : 'A';
 
+  // Jugador en turno (cálculo robusto)
+  const activeId = useMemo(() => {
+    if (!snapshot?.turnPlayerId) return null;
+    return String(snapshot.turnPlayerId);
+  }, [snapshot?.turnPlayerId]);
 
-  // Jugador en turno (cálculo robusto) 
-  const activeId = useMemo(() => { if (!snapshot?.turnPlayerId) return null; return String(snapshot.turnPlayerId); }, [snapshot?.turnPlayerId]);
-  // Buscar al jugador activo de forma robusta (id o clientId)
   const activePlayer = useMemo(() => {
     if (!snapshot || !activeId) return null;
     return (
@@ -75,7 +81,6 @@ export default function App() {
       null
     );
   }, [snapshot, activeId]);
-
 
   const activeTeam = snapshot?.turnTeam ?? null;
   const activePlayerName =
@@ -186,7 +191,6 @@ export default function App() {
         }
 
         if (data.type === 'triviaEnd') {
-          // Detectar acierto posible
           const correct =
             (typeof data.correct === 'boolean' ? data.correct : undefined) ??
             (data.winnerClientId ? data.winnerClientId === clientId : undefined) ??
@@ -237,6 +241,11 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Si el servidor cambia a estado 'active', desactiva el solo-lobby
+  useEffect(() => {
+    if (snapshot?.state === 'active') setShowOnlyLobby(false);
+  }, [snapshot?.state]);
+
   useEffect(() => {
     if (!trivia) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setTrivia(null); };
@@ -257,6 +266,7 @@ export default function App() {
     const token = clientId || ensureTokenInURL();
     if (!clientId) setClientId(token);
     ws.send(JSON.stringify({ type: 'createRoom', name: name || 'Host', team, clientId: token }));
+    setShowOnlyLobby(true);  // ✅ tras crear sala, solo mostrar Lobby
   };
 
   const joinRoom = () => {
@@ -271,9 +281,9 @@ export default function App() {
   const startGame = () => {
     if (!ws) return;
 
-    // Si aún no hay snapshot, deja que el server valide
     if (!snapshot) {
       ws.send(JSON.stringify({ type: 'startGame' }));
+      setShowOnlyLobby(false); // ✅ al intentar iniciar, dejamos de forzar solo-lobby
       return;
     }
 
@@ -292,6 +302,7 @@ export default function App() {
     }
 
     ws.send(JSON.stringify({ type: 'startGame' }));
+    setShowOnlyLobby(false); // ✅ al iniciar, dejamos la fase solo-lobby
   };
 
   const answerTrivia = (idx: number) => {
@@ -366,19 +377,16 @@ export default function App() {
         onWatch={openWatchDialog}
       />
 
-      <Container sx={{ mt: 3, pb: 3 }} >
-        {snapshot?.state === 'active' ? (
+      <Container sx={{ mt: 3, pb: 3 }}>
+        {/* ✅ Fase solo-lobby después de crear sala */}
+        {showOnlyLobby && snapshot?.state !== 'active' ? (
           <SectionCard compact>
-            <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'flex-start', sm: 'center' }} justifyContent="space-between" spacing={1.5}>
-              <Typography variant="subtitle1" sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                Sala <b>{snapshot.code}</b> • Jugando: <b>{teamNames.A}</b> vs <b>{teamNames.B}</b>
-              </Typography>
-              <Stack direction="row" spacing={1}><Chip color="success" size="small" label="Partida en curso" /></Stack>
-            </Stack>
-          </SectionCard>
-        ) : (
-          <SectionCard compact>
-            <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'flex-start', sm: 'center' }} justifyContent="space-between" spacing={1.5}>
+            <Stack
+              direction={{ xs: 'column', sm: 'row' }}
+              alignItems={{ xs: 'flex-start', sm: 'center' }}
+              justifyContent="space-between"
+              spacing={1.5}
+            >
               <Typography variant="subtitle1">Lobby</Typography>
             </Stack>
 
@@ -394,84 +402,216 @@ export default function App() {
                 onStart={startGame}
                 onJoin={joinRoom}
               />
+              {/* ❌ En modo solo-lobby NO mostramos TeamLobbyPanel ni más UI */}
             </Box>
           </SectionCard>
-        )}
-
-        {snapshot && (
-          <Grid container spacing={2}>
-            <Grid size={{ xs: 12, md: 8 }}>
-              <SectionCard disabledStyling={gameOver} compact>
-                <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={1}>
-                  <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                    Atacando a <b>{teamNames[enemyTeam]}</b>
+        ) : (
+          <>
+            {/* Barra superior: estado activo o lobby normal */}
+            {snapshot?.state === 'active' ? (
+              <SectionCard compact>
+                <Stack
+                  direction={{ xs: 'column', sm: 'row' }}
+                  alignItems={{ xs: 'flex-start', sm: 'center' }}
+                  justifyContent="space-between"
+                  spacing={1.5}
+                >
+                  <Typography
+                    variant="subtitle1"
+                    sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}
+                  >
+                    Sala <b>{snapshot.code}</b> • Jugando: <b>{teamNames.A}</b> vs <b>{teamNames.B}</b>
                   </Typography>
-                  <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-                    <Chip
-                      label={snapshot.state === 'active' ? ((snapshot.turnTeam === team) ? 'Tu turno' : 'Turno rival') : snapshot.state}
-                      color={(snapshot.state === 'active' && snapshot.turnTeam === team) ? 'success' : 'default'}
-                      size="small"
-                    />
-                    <Chip variant="outlined" color="primary" size="small" label={`Objetivo: ${teamNames[enemyTeam]} · ${snapshot.shipsRemaining[enemyTeam]}/${FLEET_TOTAL_SHIPS}`} />
+                  <Stack direction="row" spacing={1}>
+                    <Chip color="success" size="small" label="Partida en curso" />
                   </Stack>
                 </Stack>
-                <Box sx={{ mt: 2, overflowX: 'auto', overflowY: 'hidden', WebkitOverflowScrolling: 'touch', maxWidth: boardScrollMaxW, pb: 1 }}>
-                  <GridBoard
-                    size={SIZE}
-                    hits={hitsEnemy}
-                    misses={missesEnemy}
-                    onClick={fireAt}
-                    disabled={!myTurn || gameOver || !!pendingShot}
-                    cellSize={cellSize}
+              </SectionCard>
+            ) : (
+              <SectionCard compact>
+                <Stack
+                  direction={{ xs: 'column', sm: 'row' }}
+                  alignItems={{ xs: 'flex-start', sm: 'center' }}
+                  justifyContent="space-between"
+                  spacing={1.5}
+                >
+                  <Typography variant="subtitle1">Lobby</Typography>
+                </Stack>
+
+                <Box mt={1.5}>
+                  <Lobby
+                    name={name} setName={setName}
+                    team={team} setTeam={setTeam}
+                    mode={mode} setMode={setMode}
+                    code={code} setCode={setCode}
+                    teamNames={teamNames}
+                    isHost={isHost}
+                    onCreate={createRoom}
+                    onStart={startGame}
+                    onJoin={joinRoom}
+                  />
+                  {/* 👇 En lobby normal (no solo-lobby) sí mostramos el panel de equipos */}
+                  <TeamLobbyPanel
+                    snapshot={snapshot}
+                    clientId={clientId}
+                    team={team}
+                    setTeam={setTeam}
+                    onLeave={leaveGame}
+                    ws={ws}
                   />
                 </Box>
               </SectionCard>
+            )}
 
-              <SectionCard compact>
-                <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={1}>
-                  <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                    Mi flota ({teamNames[team]})
-                  </Typography>
-                  <Stack direction="row" spacing={1} flexWrap="wrap">
-                    <Chip size="small" label="Barco" sx={{ bgcolor: '#c8e6c9' }} />
-                    <Chip size="small" label="Impacto" sx={{ bgcolor: '#d32f2f', color: 'white' }} />
-                    <Chip size="small" label="Fallo" sx={{ bgcolor: '#90caf9' }} />
-                  </Stack>
-                </Stack>
-                <Box sx={{ mt: 2, overflowX: 'auto', overflowY: 'hidden', WebkitOverflowScrolling: 'touch', maxWidth: boardScrollMaxW, pb: 1 }}>
-                  <GridBoard size={SIZE} hits={hitsMine} misses={missesMine} ownShips={ownShips} showShips disabled cellSize={cellSize} />
-                </Box>
-              </SectionCard>
-            </Grid>
+            {/* Cuerpo principal solo cuando la partida está activa */}
+            {snapshot && snapshot.state === 'active' && (
+              <Grid container spacing={2}>
+                <Grid size={{ xs: 12, md: 8 }}>
+                  <SectionCard disabledStyling={gameOver} compact>
+                    <Stack
+                      direction={{ xs: 'column', sm: 'row' }}
+                      justifyContent="space-between"
+                      alignItems={{ xs: 'flex-start', sm: 'center' }}
+                      spacing={1}
+                    >
+                      <Typography
+                        variant="h6"
+                        sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}
+                      >
+                        Atacando a <b>{teamNames[enemyTeam]}</b>
+                      </Typography>
+                      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                        <Chip
+                          label={
+                            snapshot.state === 'active'
+                              ? snapshot.turnTeam === team
+                                ? 'Tu turno'
+                                : 'Turno rival'
+                              : snapshot.state
+                          }
+                          color={snapshot.state === 'active' && snapshot.turnTeam === team ? 'success' : 'default'}
+                          size="small"
+                        />
+                        <Chip
+                          variant="outlined"
+                          color="primary"
+                          size="small"
+                          label={`Objetivo: ${teamNames[enemyTeam]} · ${snapshot.shipsRemaining[enemyTeam]}/${FLEET_TOTAL_SHIPS}`}
+                        />
+                      </Stack>
+                    </Stack>
 
-            <Grid size={{ xs: 12, md: 4 }}>
-              <SectionCard disabledStyling={gameOver} compact>
-                <Typography variant="subtitle1" sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1, flexWrap: 'wrap' }}>
-                  Turno:
-                  <Chip size="small" color="info" label={`${teamNames[snapshot.turnTeam]}${turnPlayerName ? ' · ' + turnPlayerName : ' · esperando...'}`} />
-                </Typography>
-                <Divider sx={{ my: 1.5 }} />
-                <FleetPanel teamNames={teamNames} shipsRemaining={snapshot.shipsRemaining} />
-              </SectionCard>
+                    <Box
+                      sx={{
+                        mt: 2,
+                        overflowX: 'auto',
+                        overflowY: 'hidden',
+                        WebkitOverflowScrolling: 'touch',
+                        maxWidth: boardScrollMaxW,
+                        pb: 1,
+                      }}
+                    >
+                      <GridBoard
+                        size={SIZE}
+                        hits={hitsEnemy}
+                        misses={missesEnemy}
+                        onClick={fireAt}
+                        disabled={!myTurn || gameOver || !!pendingShot}
+                        cellSize={cellSize}
+                      />
+                    </Box>
+                  </SectionCard>
 
-              <SectionCard disabledStyling={gameOver} compact>
-                <Typography variant="h6" gutterBottom>Armas del equipo {teamNames[team]}</Typography>
-                <WeaponsPanel weaponCounts={weaponCounts} weaponToUse={weaponToUse} setWeaponToUse={setWeaponToUse} />
-              </SectionCard>
+                  <SectionCard compact>
+                    <Stack
+                      direction={{ xs: 'column', sm: 'row' }}
+                      justifyContent="space-between"
+                      alignItems={{ xs: 'flex-start', sm: 'center' }}
+                      spacing={1}
+                    >
+                      <Typography
+                        variant="h6"
+                        sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}
+                      >
+                        Mi flota ({teamNames[team]})
+                      </Typography>
+                      <Stack direction="row" spacing={1} flexWrap="wrap">
+                        <Chip size="small" label="Barco" sx={{ bgcolor: '#c8e6c9' }} />
+                        <Chip size="small" label="Impacto" sx={{ bgcolor: '#d32f2f', color: 'white' }} />
+                        <Chip size="small" label="Fallo" sx={{ bgcolor: '#90caf9' }} />
+                      </Stack>
+                    </Stack>
 
-              <SectionCard compact>
-                <Typography variant="h6" gutterBottom>Jugadores</Typography>
-                <PlayersList
-                  snapshot={snapshot}
-                  activePlayerId={activeId}
-                  activeTeam={activeTeam}
-                  activePlayerName={activePlayerName}
-                />
-              </SectionCard>
-            </Grid>
-          </Grid>
+                    <Box
+                      sx={{
+                        mt: 2,
+                        overflowX: 'auto',
+                        overflowY: 'hidden',
+                        WebkitOverflowScrolling: 'touch',
+                        maxWidth: boardScrollMaxW,
+                        pb: 1,
+                      }}
+                    >
+                      <GridBoard
+                        size={SIZE}
+                        hits={hitsMine}
+                        misses={missesMine}
+                        ownShips={ownShips}
+                        showShips
+                        disabled
+                        cellSize={cellSize}
+                      />
+                    </Box>
+                  </SectionCard>
+                </Grid>
+
+                <Grid size={{ xs: 12, md: 4 }}>
+                  <SectionCard disabledStyling={gameOver} compact>
+                    <Typography
+                      variant="subtitle1"
+                      sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1, flexWrap: 'wrap' }}
+                    >
+                      Turno:
+                      <Chip
+                        size="small"
+                        color="info"
+                        label={`${teamNames[snapshot.turnTeam]}${turnPlayerName ? ' · ' + turnPlayerName : ' · esperando...'
+                          }`}
+                      />
+                    </Typography>
+                    <Divider sx={{ my: 1.5 }} />
+                    <FleetPanel teamNames={teamNames} shipsRemaining={snapshot.shipsRemaining} />
+                  </SectionCard>
+
+                  <SectionCard disabledStyling={gameOver} compact>
+                    <Typography variant="h6" gutterBottom>
+                      Armas del equipo {teamNames[team]}
+                    </Typography>
+                    <WeaponsPanel
+                      weaponCounts={weaponCounts}
+                      weaponToUse={weaponToUse}
+                      setWeaponToUse={setWeaponToUse}
+                    />
+                  </SectionCard>
+
+                  <SectionCard compact>
+                    <Typography variant="h6" gutterBottom>
+                      Jugadores
+                    </Typography>
+                    <PlayersList
+                      snapshot={snapshot}
+                      activePlayerId={activeId}
+                      activeTeam={activeTeam}
+                      activePlayerName={activePlayerName}
+                    />
+                  </SectionCard>
+                </Grid>
+              </Grid>
+            )}
+          </>
         )}
       </Container>
+
 
       {snapshot && (
         <TurnAlert team={snapshot.turnTeam} teamName={teamNames[snapshot.turnTeam]} playerName={turnPlayerName} />
@@ -481,7 +621,11 @@ export default function App() {
         <TriviaDialog trivia={trivia} teamNames={teamNames} onClose={() => setTrivia(null)} onAnswer={answerTrivia} />
       )}
 
-      <Snackbar open={!!toast} autoHideDuration={3000} onClose={() => setToast(null)}>
+      <Snackbar
+        open={!!toast || !!trivia} // ✅ ahora también abre con trivia activa
+        autoHideDuration={3000}
+        onClose={() => setToast(null)}
+      >
         {trivia ? (
           <Alert severity={trivia.canAnswer ? 'success' : 'warning'} sx={{ mb: 2 }}>
             {trivia.canAnswer ? '¡Te toca responder!' : <>Responde <b>{trivia.playerName ?? 'jugador en turno'}</b> — <b>{teamNames[(trivia as any).team as Team] ?? ''}</b></>}
