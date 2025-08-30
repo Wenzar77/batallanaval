@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef } from 'react';
+import { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import {
   Container, Stack, Typography, Chip, Divider, Snackbar, Alert, Box,
   Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField, Grid
@@ -20,15 +20,21 @@ import { ensureTokenInURL, readQS, setQS, QS_CODE, QS_TOKEN } from './utils/url'
 import type { Snapshot, Team, TriviaMsg, TeamBreakdown } from './types/game';
 import TeamLobbyPanel from './components/TeamLobbyPanel';
 
+type PendingShot = { x: number; y: number; weapon?: string | null; nonce?: string };
+
 const isScreen = typeof window !== 'undefined' && window.location.pathname.endsWith('/screen');
 
 export default function App() {
+  // Responsive
   const { cellSize, boardScrollMaxW } = useResponsiveBoard();
+  const isValidName = (s: string) => s.trim().length > 0;
 
+  // QS inicial
   const initialQS = useMemo(() => readQS(), []);
   const initialCode = (initialQS.get(QS_CODE) ?? '').toUpperCase();
   const initialToken = initialQS.get(QS_TOKEN) ?? '';
 
+  // Estado base
   const [ws, setWs] = useState<WebSocket | null>(null);
   const [connected, setConnected] = useState(false);
   const [code, setCode] = useState<string>(initialCode);
@@ -37,41 +43,35 @@ export default function App() {
   const [team, setTeam] = useState<Team>('A');
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [isHost, setIsHost] = useState(false);
+
+  // UI & juego
   const [toast, setToast] = useState<string | null>(null);
   const [trivia, setTrivia] = useState<TriviaMsg | null>(null);
   const [showOnlyLobby, setShowOnlyLobby] = useState(false);
 
-
-  type PendingShot = { x: number; y: number; weapon?: string | null; nonce?: string };
   const [pendingShot, setPendingShot] = useState<PendingShot | null>(null);
-
   const [weaponToUse, setWeaponToUse] = useState<string | null>(null);
   const [doubleShotPending, setDoubleShotPending] = useState<number>(0);
   const [mode, setMode] = useState<'crear' | 'unirme'>('crear');
   const [myFleetCells, setMyFleetCells] = useState<string[] | null>(null);
 
-  // Diálogo para "Ver tablero"
+  // Dialog "Ver tablero"
   const [askCodeOpen, setAskCodeOpen] = useState(false);
   const [inputCode, setInputCode] = useState<string>('');
 
+  // Refs
   const wasActiveRef = useRef(false);
 
-  const leaveGame = () => {
-    if (!ws) return;
-    ws.send(JSON.stringify({ type: 'leaveRoom' }));
-    setSnapshot(null); setIsHost(false); setCode(''); setMode('crear');
-    setQS({ [QS_CODE]: null, [QS_TOKEN]: null });
-    setShowOnlyLobby(false); // ✅ salir cancela el modo solo-lobby
-  };
-
+  // Derivados útiles
   const teamNames = snapshot?.teamNames ?? DEFAULT_TEAM_NAMES;
   const enemyTeam: Team = team === 'A' ? 'B' : 'A';
+  const isActiveGame = snapshot?.state === 'active';
+  const gameOver = snapshot?.state === 'finished_A' || snapshot?.state === 'finished_B';
+  const winnerTeamId: Team | null =
+    !snapshot ? null : snapshot.state === 'finished_A' ? 'A' : snapshot.state === 'finished_B' ? 'B' : null;
 
-  // Jugador en turno (cálculo robusto)
-  const activeId = useMemo(() => {
-    if (!snapshot?.turnPlayerId) return null;
-    return String(snapshot.turnPlayerId);
-  }, [snapshot?.turnPlayerId]);
+  // Jugador en turno (robusto)
+  const activeId = useMemo(() => (snapshot?.turnPlayerId ? String(snapshot.turnPlayerId) : null), [snapshot?.turnPlayerId]);
 
   const activePlayer = useMemo(() => {
     if (!snapshot || !activeId) return null;
@@ -84,46 +84,197 @@ export default function App() {
 
   const activeTeam = snapshot?.turnTeam ?? null;
   const activePlayerName =
-    snapshot?.players.find(p => String(p.id) === String(snapshot.turnPlayerId))?.name
-    ?? (snapshot as any)?.turnPlayerName
-    ?? null;
+    snapshot?.players.find(p => String(p.id) === String(snapshot?.turnPlayerId))?.name ??
+    (snapshot as any)?.turnPlayerName ??
+    null;
+  const turnPlayerName = activePlayer?.name ?? activePlayerName ?? null;
 
-  const turnPlayer = activePlayer ?? (snapshot?.turnPlayerId ? snapshot.players.find(p => p.id === snapshot.turnPlayerId) : undefined) ?? undefined;
-  const turnPlayerName = activePlayerName ?? turnPlayer?.name ?? null;
+  // Historiales / celdas
+  const hitsEnemy = useMemo(
+    () => (!snapshot ? new Set<string>() : new Set(team === 'A' ? snapshot.history.A : snapshot.history.B)),
+    [snapshot, team]
+  );
+  const missesEnemy = useMemo(
+    () => (!snapshot ? new Set<string>() : new Set(team === 'A' ? snapshot.history.Amiss : snapshot.history.Bmiss)),
+    [snapshot, team]
+  );
+  const hitsMine = useMemo(
+    () => (!snapshot ? new Set<string>() : new Set(team === 'A' ? snapshot.history.B : snapshot.history.A)),
+    [snapshot, team]
+  );
+  const missesMine = useMemo(
+    () => (!snapshot ? new Set<string>() : new Set(team === 'A' ? snapshot.history.Bmiss : snapshot.history.Amiss)),
+    [snapshot, team]
+  );
+  const ownShips = useMemo(
+    () => (myFleetCells?.length ? new Set(myFleetCells) : new Set(!snapshot ? [] : getTeamShipCells(snapshot, team, clientId))),
+    [snapshot, team, clientId, myFleetCells]
+  );
+  const myTurn = !!(snapshot && isActiveGame && snapshot.turnTeam === team);
 
-  const actuallyFire = (i: number, j: number, weapon?: string | null) => {
+  // Armas / puntuación
+  const myWeapons = snapshot?.weapons?.[team] || [];
+  const weaponCounts = useMemo(
+    () => myWeapons.reduce<Record<string, number>>((acc, w) => { acc[w] = (acc[w] || 0) + 1; return acc; }, {}),
+    [myWeapons]
+  );
+
+  const teamBreakdown: Record<Team, TeamBreakdown> | undefined = useMemo(() => {
+    if (!snapshot) return undefined;
+    return (
+      (snapshot.scores?.breakdown?.teams || snapshot.teamStats || snapshot.breakdown?.teams || snapshot.stats?.teams) as
+      | Record<Team, TeamBreakdown>
+      | undefined
+    );
+  }, [snapshot]);
+
+  type LeaderboardRow = { teamId: Team | string; teamName: string; points: number; hits?: number; sinks?: number; trivia?: number };
+  const finalLeaderboard: LeaderboardRow[] = useMemo(() => {
+    const tn = snapshot?.teamNames ?? DEFAULT_TEAM_NAMES;
+    const teamScores = snapshot?.scores?.teams ?? { A: 0, B: 0 };
+    return [
+      { teamId: 'A', teamName: tn.A, points: teamScores.A ?? 0, ...(teamBreakdown?.A ?? {}) },
+      { teamId: 'B', teamName: tn.B, points: teamScores.B ?? 0, ...(teamBreakdown?.B ?? {}) },
+    ].sort((a, b) => b.points - a.points);
+  }, [snapshot, teamBreakdown]);
+
+  // === Handlers ===
+  const leaveGame = useCallback(() => {
+    if (!ws) return;
+    ws.send(JSON.stringify({ type: 'leaveRoom' }));
+    setSnapshot(null);
+    setIsHost(false);
+    setCode('');
+    setMode('crear');
+    setQS({ [QS_CODE]: null, [QS_TOKEN]: null });
+    setShowOnlyLobby(false);
+  }, [ws]);
+
+  const actuallyFire = useCallback((i: number, j: number, weapon?: string | null) => {
     if (!ws || !myTurn) return;
     ws.send(JSON.stringify({ type: 'fire', x: i, y: j, weapon: weapon || undefined }));
 
     if (weapon === 'doubleShot') {
-      if (doubleShotPending === 0) setDoubleShotPending(1);
-      else {
-        setDoubleShotPending(0);
+      setDoubleShotPending(prev => {
+        if (prev === 0) return 1;
         setWeaponToUse(null);
-      }
+        return 0;
+      });
     } else {
       setWeaponToUse(null);
     }
-  };
+  }, [ws, myTurn]);
 
-  const fireAt = (i: number, j: number) => {
+  const fireAt = useCallback((i: number, j: number) => {
     if (!ws || !myTurn) return;
     const weapon = weaponToUse || undefined;
 
-    // Si hay trivia y me toca responder, NO dispares aún:
     if (trivia && trivia.canAnswer) {
       setPendingShot({ x: i, y: j, weapon, nonce: (trivia as any).nonce });
       setToast('Primero responde la trivia para poder disparar.');
       return;
     }
-
     actuallyFire(i, j, weapon);
-  };
+  }, [ws, myTurn, weaponToUse, trivia, actuallyFire]);
 
+  const createRoom = useCallback(() => {
+    if (!ws) return;
+
+    if (!isValidName(name)) {
+      setToast('⚠️ Debes ingresar tu nombre antes de crear la sala.');
+      return;
+    }
+
+    setIsHost(true);
+    const token = clientId || ensureTokenInURL();
+    if (!clientId) setClientId(token);
+    ws.send(JSON.stringify({
+      type: 'createRoom',
+      name: name.trim(),
+      team,
+      clientId: token
+    }));
+    setShowOnlyLobby(true);
+  }, [ws, clientId, name, team]);
+
+
+  const joinRoom = useCallback(() => {
+    if (!ws || !code) return;
+
+    if (!isValidName(name)) {
+      setToast('⚠️ Debes ingresar tu nombre antes de unirte a la sala.');
+      return;
+    }
+
+    setIsHost(false);
+    const token = clientId || ensureTokenInURL();
+    if (!clientId) setClientId(token);
+    setQS({ [QS_CODE]: code, [QS_TOKEN]: token });
+    ws.send(JSON.stringify({
+      type: 'joinRoom',
+      code,
+      name: name.trim(),
+      team,
+      clientId: token
+    }));
+  }, [ws, code, clientId, name, team]);
+
+
+  const startGame = useCallback(() => {
+    if (!ws) return;
+
+    if (!snapshot) {
+      ws.send(JSON.stringify({ type: 'startGame' }));
+      setShowOnlyLobby(false);
+      return;
+    }
+
+    const countA = snapshot.players?.filter(p => p.team === 'A').length ?? 0;
+    const countB = snapshot.players?.filter(p => p.team === 'B').length ?? 0;
+
+    if (countA < 1 || countB < 1) {
+      const msg =
+        countA < 1 && countB < 1
+          ? 'No puedes iniciar: Jaguares y Guacamayas no tienen jugadores.'
+          : countA < 1
+            ? 'No puedes iniciar: Jaguares no tiene jugadores.'
+            : 'No puedes iniciar: Guacamayas no tienen jugadores.';
+      setToast(msg);
+      return;
+    }
+
+    ws.send(JSON.stringify({ type: 'startGame' }));
+    setShowOnlyLobby(false);
+  }, [ws, snapshot]);
+
+  const answerTrivia = useCallback((idx: number) => {
+    if (!ws || !trivia) return;
+    ws.send(JSON.stringify({ type: 'answerTrivia', nonce: trivia.nonce, answerIndex: idx }));
+    setTrivia(null);
+  }, [ws, trivia]);
+
+  const openWatchDialog = useCallback(() => {
+    setInputCode(code || '');
+    setAskCodeOpen(true);
+  }, [code]);
+
+  const confirmWatch = useCallback(() => {
+    const room = (inputCode || '').toUpperCase().trim();
+    if (!room || !ws) { setAskCodeOpen(false); return; }
+    setCode(room);
+    setQS({ [QS_CODE]: room });
+    ws.send(JSON.stringify({ type: 'watchRoom', code: room }));
+    setAskCodeOpen(false);
+  }, [inputCode, ws]);
+
+  // === Efectos ===
   // Conexión WS
   useEffect(() => {
     const wsUrl = (import.meta.env.VITE_WS_URL as string) || 'ws://localhost:3000/ws';
-    let socket: WebSocket | null = null; let retry = 0; let closedByUs = false; let gotFirstSnapshot = false;
+    let socket: WebSocket | null = null;
+    let retry = 0;
+    let closedByUs = false;
+    let gotFirstSnapshot = false;
 
     const connect = () => {
       socket = new WebSocket(wsUrl);
@@ -133,7 +284,6 @@ export default function App() {
         setConnected(true);
         retry = 0;
 
-        // Tokens / QS
         const qs = readQS();
         let urlCode = (qs.get(QS_CODE) ?? '').toUpperCase();
         let urlToken = qs.get(QS_TOKEN) ?? '';
@@ -141,7 +291,6 @@ export default function App() {
         if (!urlCode && code) { urlCode = code; setQS({ [QS_CODE]: code }); }
         if (!urlToken) { urlToken = ensureTokenInURL(); setClientId(urlToken); } else if (!clientId) { setClientId(urlToken); }
 
-        // Reanudar si ya había código y token
         if (urlCode && urlToken) {
           socket!.send(JSON.stringify({ type: 'resume', code: urlCode, clientId: urlToken }));
           setTimeout(() => {
@@ -152,16 +301,12 @@ export default function App() {
           }, 600);
         }
 
-        // Pide mi flota (si aplica)
         setTimeout(() => { try { socket?.send(JSON.stringify({ type: 'requestMyFleet' })); } catch { } }, 800);
 
-        // Modo pantalla (/screen): observar
         if (isScreen) {
           const qs2 = new URL(window.location.href).searchParams;
           const urlCode2 = (qs2.get('code') ?? '').toUpperCase();
-          if (urlCode2) {
-            socket!.send(JSON.stringify({ type: 'watchRoom', code: urlCode2 }));
-          }
+          if (urlCode2) socket!.send(JSON.stringify({ type: 'watchRoom', code: urlCode2 }));
         }
       };
 
@@ -169,8 +314,10 @@ export default function App() {
         const data = JSON.parse(ev.data);
 
         if (data.type === 'roomCreated') {
-          const newCode: string = data.code; setCode(newCode);
-          const token = clientId || ensureTokenInURL(); if (!clientId) setClientId(token);
+          const newCode: string = data.code;
+          setCode(newCode);
+          const token = clientId || ensureTokenInURL();
+          if (!clientId) setClientId(token);
           setQS({ [QS_CODE]: newCode, [QS_TOKEN]: token });
         }
 
@@ -184,7 +331,6 @@ export default function App() {
 
         if (data.type === 'trivia') {
           setTrivia(data);
-          // Si llega una trivia nueva con otro nonce, descarta un tiro pendiente anterior
           if (pendingShot && pendingShot.nonce && pendingShot.nonce !== data.nonce) {
             setPendingShot(null);
           }
@@ -196,7 +342,6 @@ export default function App() {
             (data.winnerClientId ? data.winnerClientId === clientId : undefined) ??
             false;
 
-          // Si tengo un tiro pendiente y coincide (si hay nonce), decide
           if (pendingShot && (!data.nonce || !pendingShot.nonce || data.nonce === pendingShot.nonce)) {
             if (correct) {
               actuallyFire(pendingShot.x, pendingShot.y, pendingShot.weapon);
@@ -205,12 +350,14 @@ export default function App() {
             }
             setPendingShot(null);
           }
-
           setTrivia(null);
         }
 
         if (data.type === 'left') {
-          setSnapshot(null); setIsHost(false); setCode(''); setMode('crear');
+          setSnapshot(null);
+          setIsHost(false);
+          setCode('');
+          setMode('crear');
           setQS({ [QS_CODE]: null, [QS_TOKEN]: null });
         }
 
@@ -225,7 +372,8 @@ export default function App() {
       };
 
       socket.onclose = () => {
-        setConnected(false); setWs(null);
+        setConnected(false);
+        setWs(null);
         if (!closedByUs) {
           const delay = Math.min(1000 * 2 ** retry, 8000);
           retry += 1;
@@ -241,11 +389,12 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Si el servidor cambia a estado 'active', desactiva el solo-lobby
+  // Salir del solo-lobby si el server pasa a activo
   useEffect(() => {
-    if (snapshot?.state === 'active') setShowOnlyLobby(false);
-  }, [snapshot?.state]);
+    if (isActiveGame) setShowOnlyLobby(false);
+  }, [isActiveGame]);
 
+  // Esc para cerrar trivia
   useEffect(() => {
     if (!trivia) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setTrivia(null); };
@@ -253,99 +402,7 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [trivia]);
 
-  const hitsEnemy = useMemo(() => (!snapshot ? new Set<string>() : new Set(team === 'A' ? snapshot.history.A : snapshot.history.B)), [snapshot, team]);
-  const missesEnemy = useMemo(() => (!snapshot ? new Set<string>() : new Set(team === 'A' ? snapshot.history.Amiss : snapshot.history.Bmiss)), [snapshot, team]);
-  const hitsMine = useMemo(() => (!snapshot ? new Set<string>() : new Set(team === 'A' ? snapshot.history.B : snapshot.history.A)), [snapshot, team]);
-  const missesMine = useMemo(() => (!snapshot ? new Set<string>() : new Set(team === 'A' ? snapshot.history.Bmiss : snapshot.history.Amiss)), [snapshot, team]);
-  const ownShips = useMemo(() => (myFleetCells?.length ? new Set(myFleetCells) : new Set(!snapshot ? [] : getTeamShipCells(snapshot, team, clientId))), [snapshot, team, clientId, myFleetCells]);
-  const myTurn = !!(snapshot && snapshot.state === 'active' && snapshot.turnTeam === team);
-
-  const createRoom = () => {
-    if (!ws) return;
-    setIsHost(true);
-    const token = clientId || ensureTokenInURL();
-    if (!clientId) setClientId(token);
-    ws.send(JSON.stringify({ type: 'createRoom', name: name || 'Host', team, clientId: token }));
-    setShowOnlyLobby(true);  // ✅ tras crear sala, solo mostrar Lobby
-  };
-
-  const joinRoom = () => {
-    if (!ws || !code) return;
-    setIsHost(false);
-    const token = clientId || ensureTokenInURL();
-    if (!clientId) setClientId(token);
-    setQS({ [QS_CODE]: code, [QS_TOKEN]: token });
-    ws.send(JSON.stringify({ type: 'joinRoom', code, name: name || 'Jugador', team, clientId: token }));
-  };
-
-  const startGame = () => {
-    if (!ws) return;
-
-    if (!snapshot) {
-      ws.send(JSON.stringify({ type: 'startGame' }));
-      setShowOnlyLobby(false); // ✅ al intentar iniciar, dejamos de forzar solo-lobby
-      return;
-    }
-
-    const countA = snapshot.players?.filter(p => p.team === 'A').length ?? 0;
-    const countB = snapshot.players?.filter(p => p.team === 'B').length ?? 0;
-
-    if (countA < 1 || countB < 1) {
-      const msg =
-        countA < 1 && countB < 1
-          ? 'No puedes iniciar: Jaguares y Guacamayas no tienen jugadores.'
-          : countA < 1
-            ? 'No puedes iniciar: Jaguares no tiene jugadores.'
-            : 'No puedes iniciar: Guacamayas no tiene jugadores.';
-      setToast(msg);
-      return;
-    }
-
-    ws.send(JSON.stringify({ type: 'startGame' }));
-    setShowOnlyLobby(false); // ✅ al iniciar, dejamos la fase solo-lobby
-  };
-
-  const answerTrivia = (idx: number) => {
-    if (!ws || !trivia) return;
-    ws.send(JSON.stringify({ type: 'answerTrivia', nonce: trivia.nonce, answerIndex: idx }));
-    setTrivia(null);
-  };
-
-  const myWeapons = snapshot?.weapons?.[team] || [];
-  const weaponCounts = myWeapons.reduce<Record<string, number>>((acc, w) => { acc[w] = (acc[w] || 0) + 1; return acc; }, {});
-
-  const gameOver = snapshot?.state === 'finished_A' || snapshot?.state === 'finished_B';
-  const winnerTeamId: Team | null = !snapshot ? null : snapshot.state === 'finished_A' ? 'A' : snapshot.state === 'finished_B' ? 'B' : null;
-
-  const teamBreakdown: Record<Team, TeamBreakdown> | undefined = useMemo(() => {
-    if (!snapshot) return undefined;
-    return (snapshot.scores?.breakdown?.teams || snapshot.teamStats || snapshot.breakdown?.teams || snapshot.stats?.teams) as Record<Team, TeamBreakdown> | undefined;
-  }, [snapshot]);
-
-  type LeaderboardRow = { teamId: Team | string; teamName: string; points: number; hits?: number; sinks?: number; trivia?: number; };
-  const finalLeaderboard: LeaderboardRow[] = useMemo(() => {
-    const tn = snapshot?.teamNames ?? DEFAULT_TEAM_NAMES; const teamScores = snapshot?.scores?.teams ?? { A: 0, B: 0 };
-    return ([
-      { teamId: 'A', teamName: tn.A, points: teamScores.A ?? 0, ...(teamBreakdown?.A ?? {}) },
-      { teamId: 'B', teamName: tn.B, points: teamScores.B ?? 0, ...(teamBreakdown?.B ?? {}) },
-    ]).sort((a, b) => b.points - a.points);
-  }, [snapshot, teamBreakdown]);
-
-  // Handlers del botón "Ver tablero"
-  const openWatchDialog = () => {
-    setInputCode(code || '');
-    setAskCodeOpen(true);
-  };
-
-  const confirmWatch = () => {
-    const room = (inputCode || '').toUpperCase().trim();
-    if (!room || !ws) { setAskCodeOpen(false); return; }
-    setCode(room);
-    setQS({ [QS_CODE]: room }); // guardamos en URL
-    ws.send(JSON.stringify({ type: 'watchRoom', code: room }));
-    setAskCodeOpen(false);
-  };
-
+  // === Render especial para /screen ===
   if (isScreen && snapshot) {
     return (
       <ScoreScreen
@@ -357,16 +414,16 @@ export default function App() {
     );
   }
 
+  // === Render principal ===
   return (
     <Box sx={{
-      width: "100vw",
-      height: "100vh",
+      width: '100vw',
+      height: '100vh',
       backgroundImage: "url('/bg-ocean.png')",
-      backgroundSize: "cover",
-      backgroundColor: "#87ceeb",
-      backgroundPosition: "center",
-    }}
-    >
+      backgroundSize: 'cover',
+      backgroundColor: '#87ceeb',
+      backgroundPosition: 'center'
+    }}>
       <HeaderBar
         snapshot={snapshot}
         teamNames={teamNames}
@@ -378,18 +435,12 @@ export default function App() {
       />
 
       <Container sx={{ mt: 3, pb: 3 }}>
-        {/* ✅ Fase solo-lobby después de crear sala */}
-        {showOnlyLobby && snapshot?.state !== 'active' ? (
+        {/* ✅ Fase solo-lobby tras crear sala */}
+        {showOnlyLobby && !isActiveGame ? (
           <SectionCard compact>
-            <Stack
-              direction={{ xs: 'column', sm: 'row' }}
-              alignItems={{ xs: 'flex-start', sm: 'center' }}
-              justifyContent="space-between"
-              spacing={1.5}
-            >
+            <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'flex-start', sm: 'center' }} justifyContent="space-between" spacing={1.5}>
               <Typography variant="subtitle1">Lobby</Typography>
             </Stack>
-
             <Box mt={1.5}>
               <Lobby
                 name={name} setName={setName}
@@ -402,25 +453,24 @@ export default function App() {
                 onStart={startGame}
                 onJoin={joinRoom}
               />
-              {/* ❌ En modo solo-lobby NO mostramos TeamLobbyPanel ni más UI */}
+              <TeamLobbyPanel
+                snapshot={snapshot}
+                clientId={clientId}
+                team={team}
+                setTeam={setTeam}
+                onLeave={leaveGame}
+                ws={ws}
+              />
             </Box>
           </SectionCard>
         ) : (
           <>
-            {/* Barra superior: estado activo o lobby normal */}
-            {snapshot?.state === 'active' ? (
+            {/* Encabezado de estado */}
+            {isActiveGame ? (
               <SectionCard compact>
-                <Stack
-                  direction={{ xs: 'column', sm: 'row' }}
-                  alignItems={{ xs: 'flex-start', sm: 'center' }}
-                  justifyContent="space-between"
-                  spacing={1.5}
-                >
-                  <Typography
-                    variant="subtitle1"
-                    sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}
-                  >
-                    Sala <b>{snapshot.code}</b> • Jugando: <b>{teamNames.A}</b> vs <b>{teamNames.B}</b>
+                <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'flex-start', sm: 'center' }} justifyContent="space-between" spacing={1.5}>
+                  <Typography variant="subtitle1" sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                    Sala <b>{snapshot?.code}</b> • Jugando: <b>{teamNames.A}</b> vs <b>{teamNames.B}</b>
                   </Typography>
                   <Stack direction="row" spacing={1}>
                     <Chip color="success" size="small" label="Partida en curso" />
@@ -429,15 +479,9 @@ export default function App() {
               </SectionCard>
             ) : (
               <SectionCard compact>
-                <Stack
-                  direction={{ xs: 'column', sm: 'row' }}
-                  alignItems={{ xs: 'flex-start', sm: 'center' }}
-                  justifyContent="space-between"
-                  spacing={1.5}
-                >
+                <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'flex-start', sm: 'center' }} justifyContent="space-between" spacing={1.5}>
                   <Typography variant="subtitle1">Lobby</Typography>
                 </Stack>
-
                 <Box mt={1.5}>
                   <Lobby
                     name={name} setName={setName}
@@ -450,67 +494,35 @@ export default function App() {
                     onStart={startGame}
                     onJoin={joinRoom}
                   />
-                  {/* 👇 En lobby normal (no solo-lobby) sí mostramos el panel de equipos */}
-                  <TeamLobbyPanel
-                    snapshot={snapshot}
-                    clientId={clientId}
-                    team={team}
-                    setTeam={setTeam}
-                    onLeave={leaveGame}
-                    ws={ws}
-                  />
                 </Box>
               </SectionCard>
             )}
 
-            {/* Cuerpo principal solo cuando la partida está activa */}
-            {snapshot && snapshot.state === 'active' && (
+            {/* Cuerpo de juego solo si está activo */}
+            {isActiveGame && (
               <Grid container spacing={2}>
                 <Grid size={{ xs: 12, md: 8 }}>
                   <SectionCard disabledStyling={gameOver} compact>
-                    <Stack
-                      direction={{ xs: 'column', sm: 'row' }}
-                      justifyContent="space-between"
-                      alignItems={{ xs: 'flex-start', sm: 'center' }}
-                      spacing={1}
-                    >
-                      <Typography
-                        variant="h6"
-                        sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}
-                      >
+                    <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={1}>
+                      <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
                         Atacando a <b>{teamNames[enemyTeam]}</b>
                       </Typography>
                       <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
                         <Chip
-                          label={
-                            snapshot.state === 'active'
-                              ? snapshot.turnTeam === team
-                                ? 'Tu turno'
-                                : 'Turno rival'
-                              : snapshot.state
-                          }
-                          color={snapshot.state === 'active' && snapshot.turnTeam === team ? 'success' : 'default'}
+                          label={myTurn ? 'Tu turno' : 'Turno rival'}
+                          color={myTurn ? 'success' : 'default'}
                           size="small"
                         />
                         <Chip
                           variant="outlined"
                           color="primary"
                           size="small"
-                          label={`Objetivo: ${teamNames[enemyTeam]} · ${snapshot.shipsRemaining[enemyTeam]}/${FLEET_TOTAL_SHIPS}`}
+                          label={`Objetivo: ${teamNames[enemyTeam]} · ${snapshot?.shipsRemaining[enemyTeam]}/${FLEET_TOTAL_SHIPS}`}
                         />
                       </Stack>
                     </Stack>
 
-                    <Box
-                      sx={{
-                        mt: 2,
-                        overflowX: 'auto',
-                        overflowY: 'hidden',
-                        WebkitOverflowScrolling: 'touch',
-                        maxWidth: boardScrollMaxW,
-                        pb: 1,
-                      }}
-                    >
+                    <Box sx={{ mt: 2, overflowX: 'auto', overflowY: 'hidden', WebkitOverflowScrolling: 'touch', maxWidth: boardScrollMaxW, pb: 1 }}>
                       <GridBoard
                         size={SIZE}
                         hits={hitsEnemy}
@@ -523,16 +535,8 @@ export default function App() {
                   </SectionCard>
 
                   <SectionCard compact>
-                    <Stack
-                      direction={{ xs: 'column', sm: 'row' }}
-                      justifyContent="space-between"
-                      alignItems={{ xs: 'flex-start', sm: 'center' }}
-                      spacing={1}
-                    >
-                      <Typography
-                        variant="h6"
-                        sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}
-                      >
+                    <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={1}>
+                      <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
                         Mi flota ({teamNames[team]})
                       </Typography>
                       <Stack direction="row" spacing={1} flexWrap="wrap">
@@ -542,16 +546,7 @@ export default function App() {
                       </Stack>
                     </Stack>
 
-                    <Box
-                      sx={{
-                        mt: 2,
-                        overflowX: 'auto',
-                        overflowY: 'hidden',
-                        WebkitOverflowScrolling: 'touch',
-                        maxWidth: boardScrollMaxW,
-                        pb: 1,
-                      }}
-                    >
+                    <Box sx={{ mt: 2, overflowX: 'auto', overflowY: 'hidden', WebkitOverflowScrolling: 'touch', maxWidth: boardScrollMaxW, pb: 1 }}>
                       <GridBoard
                         size={SIZE}
                         hits={hitsMine}
@@ -567,20 +562,16 @@ export default function App() {
 
                 <Grid size={{ xs: 12, md: 4 }}>
                   <SectionCard disabledStyling={gameOver} compact>
-                    <Typography
-                      variant="subtitle1"
-                      sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1, flexWrap: 'wrap' }}
-                    >
+                    <Typography variant="subtitle1" sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1, flexWrap: 'wrap' }}>
                       Turno:
                       <Chip
                         size="small"
                         color="info"
-                        label={`${teamNames[snapshot.turnTeam]}${turnPlayerName ? ' · ' + turnPlayerName : ' · esperando...'
-                          }`}
+                        label={`${teamNames[snapshot!.turnTeam]}${turnPlayerName ? ' · ' + turnPlayerName : ' · esperando...'}`}
                       />
                     </Typography>
                     <Divider sx={{ my: 1.5 }} />
-                    <FleetPanel teamNames={teamNames} shipsRemaining={snapshot.shipsRemaining} />
+                    <FleetPanel teamNames={teamNames} shipsRemaining={snapshot!.shipsRemaining} />
                   </SectionCard>
 
                   <SectionCard disabledStyling={gameOver} compact>
@@ -595,11 +586,9 @@ export default function App() {
                   </SectionCard>
 
                   <SectionCard compact>
-                    <Typography variant="h6" gutterBottom>
-                      Jugadores
-                    </Typography>
+                    <Typography variant="h6" gutterBottom>Jugadores</Typography>
                     <PlayersList
-                      snapshot={snapshot}
+                      snapshot={snapshot!}
                       activePlayerId={activeId}
                       activeTeam={activeTeam}
                       activePlayerName={activePlayerName}
@@ -612,26 +601,35 @@ export default function App() {
         )}
       </Container>
 
-
+      {/* Overlays */}
       {snapshot && (
-        <TurnAlert team={snapshot.turnTeam} teamName={teamNames[snapshot.turnTeam]} playerName={turnPlayerName} />
+        <TurnAlert
+          team={snapshot.turnTeam}
+          teamName={teamNames[snapshot.turnTeam]}
+          playerName={turnPlayerName}
+        />
       )}
 
       {trivia && (
-        <TriviaDialog trivia={trivia} teamNames={teamNames} onClose={() => setTrivia(null)} onAnswer={answerTrivia} />
+        <TriviaDialog
+          trivia={trivia}
+          teamNames={teamNames}
+          onClose={() => setTrivia(null)}
+          onAnswer={answerTrivia}
+        />
       )}
 
-      <Snackbar
-        open={!!toast || !!trivia} // ✅ ahora también abre con trivia activa
-        autoHideDuration={3000}
-        onClose={() => setToast(null)}
-      >
+      <Snackbar open={!!toast || !!trivia} autoHideDuration={3000} onClose={() => setToast(null)}>
         {trivia ? (
           <Alert severity={trivia.canAnswer ? 'success' : 'warning'} sx={{ mb: 2 }}>
-            {trivia.canAnswer ? '¡Te toca responder!' : <>Responde <b>{trivia.playerName ?? 'jugador en turno'}</b> — <b>{teamNames[(trivia as any).team as Team] ?? ''}</b></>}
+            {trivia.canAnswer
+              ? '¡Te toca responder!'
+              : <>Responde <b>{trivia.playerName ?? 'jugador en turno'}</b> — <b>{teamNames[(trivia as any).team as Team] ?? ''}</b></>}
           </Alert>
         ) : (
-          <Alert onClose={() => setToast(null)} severity="info" sx={{ width: '100%' }}>{toast}</Alert>
+          <Alert onClose={() => setToast(null)} severity="info" sx={{ width: '100%' }}>
+            {toast}
+          </Alert>
         )}
       </Snackbar>
 
@@ -644,7 +642,7 @@ export default function App() {
         title="¡Partida terminada!"
       />
 
-      {/* Diálogo de código de sala para ver tablero */}
+      {/* Ver tablero */}
       <Dialog open={askCodeOpen} onClose={() => setAskCodeOpen(false)}>
         <DialogTitle>Ver tablero</DialogTitle>
         <DialogContent>
