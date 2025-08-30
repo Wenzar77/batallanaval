@@ -11,6 +11,8 @@ import { useMediaQuery } from '@mui/material';
 import type { Snapshot, Team } from '../types/game';
 import { buildScreenUrl } from '../utils/url';
 import { useSound } from '../sound/SoundProvider';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import CancelIcon from '@mui/icons-material/Cancel';
 
 const HeaderBar: React.FC<{
   snapshot: Snapshot | null;
@@ -63,10 +65,15 @@ const HeaderBar: React.FC<{
 
         {/* Estado de conexión */}
         <Chip
+          icon={connected ? <CheckCircleIcon /> : <CancelIcon />}
           color={connected ? 'success' : 'error'}
-          label={connected ? 'WS conectado' : 'WS desconectado'}
+          label={connected ? '' : ''}   // 👈 sin texto
           size={isXs ? 'small' : 'medium'}
-          sx={{ mr: 1, maxWidth: isXs ? 140 : 'unset' }}
+          sx={{
+            mr: 1,
+            maxWidth: isXs ? 40 : 48,   // ancho más compacto
+            '& .MuiChip-label': { display: 'none' } // oculta espacio de label
+          }}
         />
 
         {/* Toggle Sonido */}

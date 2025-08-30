@@ -6,7 +6,7 @@ import {
 import HeaderBar from './components/HeaderBar';
 import Lobby from './components/Lobby';
 import SectionCard from './components/SectionCard';
-import GridBoard from './components/Board';
+import GridBoard from './components/GridBoard';
 import FleetPanel from './components/FleetPanel';
 import WeaponsPanel from './components/WeaponsPanel';
 import PlayersList from './components/PlayersList';
@@ -51,7 +51,7 @@ export default function App() {
 
   const [pendingShot, setPendingShot] = useState<PendingShot | null>(null);
   const [weaponToUse, setWeaponToUse] = useState<string | null>(null);
-  const [setDoubleShotPending] = useState<number>(0);
+  const [DoubleShotPending, setDoubleShotPending] = useState<number>(0);
   const [mode, setMode] = useState<'crear' | 'unirme'>('crear');
   const [myFleetCells, setMyFleetCells] = useState<string[] | null>(null);
 
@@ -437,7 +437,7 @@ export default function App() {
       <Container sx={{ mt: 3, pb: 3 }}>
         {/* ✅ Fase solo-lobby tras crear sala */}
         {showOnlyLobby && !isActiveGame ? (
-          <SectionCard compact>            
+          <SectionCard compact>
             <Box mt={1.5}>
               <Lobby
                 name={name} setName={setName}
@@ -475,7 +475,7 @@ export default function App() {
                 </Stack>
               </SectionCard>
             ) : (
-              <SectionCard compact>                
+              <SectionCard compact>
                 <Box mt={1.5}>
                   <Lobby
                     name={name} setName={setName}
