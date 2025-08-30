@@ -19,6 +19,7 @@ import { SIZE, DEFAULT_TEAM_NAMES, TEAM_ICONS, getTeamShipCells, FLEET_TOTAL_SHI
 import { ensureTokenInURL, readQS, setQS, QS_CODE, QS_TOKEN } from './utils/url';
 import type { Snapshot, Team, TriviaMsg, TeamBreakdown } from './types/game';
 import TeamLobbyPanel from './components/TeamLobbyPanel';
+import { SoundTest } from './components/SoundTest';
 
 type PendingShot = { x: number; y: number; weapon?: string | null; nonce?: string };
 
@@ -647,6 +648,7 @@ export default function App() {
           <Button variant="contained" onClick={confirmWatch}>Ver</Button>
         </DialogActions>
       </Dialog>
+      <SoundTest snapshot={snapshot} />
     </Box>
   );
 }
