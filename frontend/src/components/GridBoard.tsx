@@ -1,10 +1,51 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Box } from '@mui/material';
 
-export const Cell: React.FC<{ size: number; state: 'unknown' | 'hit' | 'miss' | 'ship' }> = ({ size, state }) => {
+export const Cell2: React.FC<{ size: number; state: 'unknown' | 'hit' | 'miss' | 'ship' }> = ({ size, state }) => {
   const bg = state === 'hit' ? '#d32f2f' : state === 'miss' ? 'rgba(215, 240, 244, 0.92)' : state === 'ship' ? '#73a075ff' : '#e0e0e0';
   return <Box sx={{ width: size, height: size, bgcolor: bg, border: '1px solid rgba(215, 240, 244, 0.92)', borderRadius: 0.1 }} />;
 };
+
+import { useSound } from '../sound/SoundProvider';
+
+export const Cell: React.FC<{
+  size: number;
+  state: 'unknown' | 'hit' | 'miss' | 'ship';
+}> = ({ size, state }) => {
+  const { play } = useSound();
+
+  // Reproduce sonido solo cuando cambia el estado a hit/miss
+  useEffect(() => {
+    if (state === 'hit') play('hit');
+    if (state === 'miss') play('miss');
+    // si quieres sonido al mostrar un barco hundido:
+    if (state === 'ship') {
+      // opcional -> play('sink');
+    }
+  }, [state, play]);
+
+  const bg =
+    state === 'hit'
+      ? '#d32f2f'
+      : state === 'miss'
+        ? 'rgba(215, 240, 244, 0.92)'
+        : state === 'ship'
+          ? '#73a075ff'
+          : '#e0e0e0';
+
+  return (
+    <Box
+      sx={{
+        width: size,
+        height: size,
+        bgcolor: bg,
+        border: '1px solid rgba(215, 240, 244, 0.92)',
+        borderRadius: 0.1,
+      }}
+    />
+  );
+};
+
 
 const GridBoard: React.FC<{
   size: number;

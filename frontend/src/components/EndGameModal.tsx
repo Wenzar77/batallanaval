@@ -5,6 +5,7 @@ import {
   Box, Typography, Table, TableHead, TableRow, TableCell, TableBody, Chip, Stack, Divider
 } from '@mui/material';
 import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
+import { useSound } from '../sound/SoundProvider';
 
 export type LeaderboardRow = {
   teamId: string;       // 'A' | 'B' | ...
@@ -23,6 +24,22 @@ export const EndGameModal: React.FC<{
   winnerTeamId?: string | null; // si es null => empate
   title?: string;
 }> = ({ open, onRestart, onExit, leaderboard, winnerTeamId, title }) => {
+  const { play } = useSound();
+
+  // ✅ Reproducir win.mp3 solo una vez al abrir el modal (fin del juego)
+  const playedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!open) {
+      playedRef.current = false; // se resetea al cerrar
+      return;
+    }
+    // Si quieres que suene también en empate, quita la condición de winnerTeamId
+    if (!playedRef.current) {
+      playedRef.current = true;
+      play('win');
+    }
+  }, [open, winnerTeamId, play]);
+
   const sorted = React.useMemo(
     () => [...leaderboard].sort((a, b) => b.points - a.points),
     [leaderboard]
@@ -114,8 +131,6 @@ export const EndGameModal: React.FC<{
               </TableBody>
             </Table>
           </Box>
-
-          {/* Si prefieres, coloca aquí tu <ScoreScreen ... /> */}
         </Stack>
       </DialogContent>
 

@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useMemo, useRef, useState, useEffect } from "react";
 
-type SoundName = "hit" | "miss" | "sink";
+type SoundName = "hit" | "miss" | "sink" | "win";
 type SoundContextValue = {
   isMuted: boolean;
   toggleMute: () => void;
@@ -21,6 +21,7 @@ export const SoundProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     hit: new Audio("/sounds/hit.mp3"),
     miss: new Audio("/sounds/miss.mp3"),
     sink: new Audio("/sounds/sink.mp3"),
+    win: new Audio("/sounds/win.mp3"),
   });
 
   useEffect(() => {

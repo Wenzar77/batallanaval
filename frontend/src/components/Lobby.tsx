@@ -36,13 +36,13 @@ const Lobby: React.FC<{
             <MenuItem value="A">
               <Stack direction="row" alignItems="center" spacing={1}>
                 <Avatar sx={{ width: 20, height: 20, fontSize: 14 }}>🐆</Avatar>
-                <span>{teamNames.A} (A)</span>
+                <span>{teamNames.A}</span>
               </Stack>
             </MenuItem>
             <MenuItem value="B">
               <Stack direction="row" alignItems="center" spacing={1}>
                 <Avatar sx={{ width: 20, height: 20, fontSize: 14 }}>🦜</Avatar>
-                <span>{teamNames.B} (B)</span>
+                <span>{teamNames.B}</span>
               </Stack>
             </MenuItem>
           </Select>
