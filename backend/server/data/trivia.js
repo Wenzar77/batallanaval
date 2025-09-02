@@ -178,8 +178,8 @@ const TRIVIA_COLOMBIA_EXTRA = [
     a: 3
   },
   {
-    q: "¿Qué departamento colombiano limita con 5 países?",
-    opts: ["Amazonas", "Guainía", "Vichada", "Putumayo"],
+    q: "¿Qué departamento colombiano limita con 2 países?",
+    opts: ["Choco", "Guainía", "Norte de Santander", "Putumayo"],
     a: 1
   },
   {
