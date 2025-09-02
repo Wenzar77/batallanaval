@@ -66,8 +66,8 @@ export default memo(function TeamLobbyPanel({
               bgcolor: isMe ? 'action.selected' : 'transparent',
             }}
           >
-            <Avatar sx={{ width: 28, height: 28 }}>{(p.name ?? '?').slice(0,1).toUpperCase()}</Avatar>
-            <Typography variant="body2">
+            <Avatar sx={{ width: 28, height: 28 }}>{(p.name ?? '?').slice(0, 1).toUpperCase()}</Avatar>
+            <Typography component='div'>
               {p.name || 'Jugador'}
               {isMe && <Chip size="small" label="Tú" color="primary" sx={{ ml: 1 }} />}
             </Typography>

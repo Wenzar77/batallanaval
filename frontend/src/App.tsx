@@ -52,7 +52,6 @@ export default function App() {
 
   const [pendingShot, setPendingShot] = useState<PendingShot | null>(null);
   const [weaponToUse, setWeaponToUse] = useState<string | null>(null);
-  const [DoubleShotPending, setDoubleShotPending] = useState<number>(0);
   const [mode, setMode] = useState<'crear' | 'unirme'>('crear');
   const [myFleetCells, setMyFleetCells] = useState<string[] | null>(null);
 
@@ -484,16 +483,17 @@ export default function App() {
               </SectionCard>
             )}
 
-            <SectionCard disabledStyling={gameOver} compact>
-              <Typography variant="h6" gutterBottom>
-                Armas del equipo {teamNames[team]}
-              </Typography>
-              <WeaponsPanel
-                weaponCounts={weaponCounts}
-                weaponToUse={weaponToUse}
-                setWeaponToUse={setWeaponToUse}
-              />
-            </SectionCard>
+            {isActiveGame && (
+              <SectionCard disabledStyling={gameOver} compact>
+                <Typography variant="h6" gutterBottom>
+                  Armas del equipo {teamNames[team]}
+                </Typography>
+                <WeaponsPanel
+                  weaponCounts={weaponCounts}
+                  weaponToUse={weaponToUse}
+                  setWeaponToUse={setWeaponToUse}
+                />
+              </SectionCard>)}
 
             {/* Cuerpo de juego solo si está activo */}
             {isActiveGame && (

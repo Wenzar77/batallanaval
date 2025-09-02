@@ -16,7 +16,7 @@ const Lobby: React.FC<{
   <>
     <Typography variant="h4" sx={{ textAlign: 'center' }}>Inicia la Batalla</Typography>
     <Grid container spacing={1} alignItems="center">
-      <Grid xs={12} md={3}>
+      <Grid size={{ xs: 12, md: 3 }}>
         <FormControl fullWidth margin="normal" size="small">
           <TextField
             fullWidth
@@ -48,10 +48,10 @@ const Lobby: React.FC<{
           </Select>
         </FormControl>
       </Grid>
-      <Grid xs={12} md={3}>
+      <Grid size={{ xs: 12, md: 3 }}>
         <FormControlLabel control={<Switch sx={{ m: 1 }} checked={mode === 'unirme'} onChange={(e) => setMode(e.target.checked ? 'unirme' : 'crear')} color="primary" />} label={mode === 'unirme' ? 'Unirme' : 'Crear sala'} />
       </Grid>
-      <Grid xs={12} md={7}>
+      <Grid size={{ xs: 12, md: 7 }}>
         {mode === 'crear' ? (
           <Stack direction={{ xs: 'column', sm: 'row' }} sx={{ m: 1 }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }}>
             <Button variant="contained" startIcon={<GroupAddIcon />} onClick={onCreate} fullWidth>Crear</Button>
