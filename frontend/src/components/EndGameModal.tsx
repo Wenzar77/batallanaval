@@ -135,8 +135,8 @@ export const EndGameModal: React.FC<{
       </DialogContent>
 
       <DialogActions sx={{ p: 2 }}>
-        <Button variant="outlined" onClick={onExit}>Salir al lobby</Button>
-        <Button variant="contained" onClick={onRestart}>Reiniciar partida</Button>
+        <Button sx={{ visibility: 'hidden' }} variant="contained" onClick={onRestart}>Reiniciar partida</Button>
+        <Button variant="outlined" onClick={onExit}>Salir al lobby</Button>        
       </DialogActions>
     </Dialog>
   );
