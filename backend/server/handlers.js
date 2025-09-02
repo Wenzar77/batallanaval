@@ -15,6 +15,26 @@ import {
   placeShipsRandomly, coordsInBomb3x3, coordsInCross, isShipSunk, countShipsRemaining, coordsInBomb2x2
 } from './board.js';
 
+
+// === Trivia deck helpers (no repetir hasta agotar) ===
+function buildTriviaDeck() {
+  // baraja índices 0..N-1
+  return Array
+    .from({ length: TRIVIA_BANK.length }, (_, i) => i)
+    .sort(() => Math.random() - 0.5);
+}
+
+/** Toma la siguiente carta de trivia; si el mazo está vacío, lo reinicia */
+function drawTriviaCard(room) {
+  if (!Array.isArray(room.triviaDeck) || room.triviaDeck.length === 0) {
+    room.triviaDeck = buildTriviaDeck();
+  }
+  const idx = room.triviaDeck.shift();   // saca el primero
+  const card = TRIVIA_BANK[idx];
+  return { card, idx };
+}
+
+
 export function handleMessage(ws, raw) {
   let data; try { data = JSON.parse(raw); } catch { return; }
   const type = data.type;
@@ -52,7 +72,8 @@ export function handleMessage(ws, raw) {
       turnPlayerId: null,
       triviaPending: null,
       scores: { teams: { A: 0, B: 0 }, players: new Map() },
-      sunk: { A: new Set(), B: new Set() },
+      sunk: { A: new Set(), B: new Set() },      
+      triviaDeck: buildTriviaDeck(),
     };
     saveRoom(room);
 
@@ -70,7 +91,7 @@ export function handleMessage(ws, raw) {
 
     ws.id = playerId;
 
-    try { ws.send(JSON.stringify({ type: 'roomCreated', code })); } catch {}
+    try { ws.send(JSON.stringify({ type: 'roomCreated', code })); } catch { }
     broadcast(room, { type: 'roomUpdate', snapshot: makeSnapshot(room) });
     return;
   }
@@ -78,7 +99,7 @@ export function handleMessage(ws, raw) {
   // -------- Unirse a sala --------
   if (type === 'joinRoom') {
     const room = getRoomByCode(data.code);
-    if (!room) { try { ws.send(JSON.stringify({ type: 'error', message: 'Sala no existe' })); } catch {} return; }
+    if (!room) { try { ws.send(JSON.stringify({ type: 'error', message: 'Sala no existe' })); } catch { } return; }
 
     const playerId = data.clientId || uuid();
     ws.id = playerId;
@@ -111,21 +132,21 @@ export function handleMessage(ws, raw) {
   if (type === 'resume') {
     const { code, clientId } = data;
     const room = getRoomByCode(code);
-    if (!room) { try { ws.send(JSON.stringify({ type: 'toast', message: 'Sala no existe' })); } catch {} return; }
+    if (!room) { try { ws.send(JSON.stringify({ type: 'toast', message: 'Sala no existe' })); } catch { } return; }
 
     ws.id = clientId;
     ws.roomCode = code;
 
     const player = room.players.get(clientId);
     if (!player) {
-      try { ws.send(JSON.stringify({ type: 'toast', message: 'No hay jugador para reanudar' })); } catch {}
+      try { ws.send(JSON.stringify({ type: 'toast', message: 'No hay jugador para reanudar' })); } catch { }
       return;
     }
 
     room.clients.add(ws);
     player.disconnectedAt = null;
 
-    try { ws.send(JSON.stringify({ type: 'resumed' })); } catch {}
+    try { ws.send(JSON.stringify({ type: 'resumed' })); } catch { }
     sendMyFleet(ws, room);
     broadcast(room, { type: 'roomUpdate', snapshot: makeSnapshot(room) });
     return;
@@ -134,14 +155,14 @@ export function handleMessage(ws, raw) {
   // -------- Ver sala (viewer /screen) --------
   if (type === 'watchRoom') {
     const room = getRoomByCode(data.code);
-    if (!room) { try { ws.send(JSON.stringify({ type: 'error', message: 'Sala no encontrada' })); } catch {} return; }
+    if (!room) { try { ws.send(JSON.stringify({ type: 'error', message: 'Sala no encontrada' })); } catch { } return; }
 
     ws.role = 'viewer';
     ws.roomCode = room.code;
     room.viewers.add(ws);
 
-    try { ws.send(JSON.stringify({ type: 'roomUpdate', snapshot: makeSnapshot(room) })); } catch {}
-    try { ws.send(JSON.stringify({ type: 'toast', message: `👀 Viendo sala ${room.code}` })); } catch {}
+    try { ws.send(JSON.stringify({ type: 'roomUpdate', snapshot: makeSnapshot(room) })); } catch { }
+    try { ws.send(JSON.stringify({ type: 'toast', message: `👀 Viendo sala ${room.code}` })); } catch { }
     return;
   }
 
@@ -170,8 +191,10 @@ export function handleMessage(ws, raw) {
       players: new Map(Array.from(room.players.keys()).map(id => [id, room.scores.players.get(id) ?? 0])),
     };
 
+    room.triviaDeck = buildTriviaDeck();
+
     // Enviar celdas privadas a cada jugador
-    for (const client of room.clients) { try { sendMyFleet(client, room); } catch {} }
+    for (const client of room.clients) { try { sendMyFleet(client, room); } catch { } }
 
     broadcast(room, { type: 'roomUpdate', snapshot: makeSnapshot(room) });
     return;
@@ -182,7 +205,7 @@ export function handleMessage(ws, raw) {
     const room = getRoomByCode(ws.roomCode); if (!room || room.state !== 'active') return;
     const shooter = room.players.get(ws.id); if (!shooter) return;
     const team = shooter.team;
-    if (team !== room.turnTeam) { try { ws.send(JSON.stringify({ type: 'error', message: 'No es tu turno' })); } catch {} return; }
+    if (team !== room.turnTeam) { try { ws.send(JSON.stringify({ type: 'error', message: 'No es tu turno' })); } catch { } return; }
 
     const { x, y, weapon } = data;
 
@@ -190,7 +213,7 @@ export function handleMessage(ws, raw) {
     if (weapon) {
       const idx = room.weapons[team].indexOf(weapon);
       if (idx === -1) {
-        try { ws.send(JSON.stringify({ type: 'toast', message: '❌ No tienes ese arma disponible' })); } catch {}
+        try { ws.send(JSON.stringify({ type: 'toast', message: '❌ No tienes ese arma disponible' })); } catch { }
         return;
       }
     }
@@ -250,7 +273,7 @@ export function handleMessage(ws, raw) {
 
     // === TRIVIA ===
     if (room.state === 'active' && Math.random() < TRIVIA_PROB && !room.triviaPending) {
-      const card = randomChoice(TRIVIA_BANK);
+      const { card } = drawTriviaCard(room);
       const nonce = uuid();
 
       room.triviaPending = {
@@ -276,7 +299,7 @@ export function handleMessage(ws, raw) {
             allowedPlayerId: shooter.id
           };
           client.send(JSON.stringify(payload));
-        } catch {}
+        } catch { }
       }
       // Viewers (solo informativo)
       if (room.viewers && room.viewers.size) {
@@ -289,7 +312,7 @@ export function handleMessage(ws, raw) {
           team: team,
           allowedPlayerId: shooter.id
         };
-        for (const viewer of room.viewers) { try { viewer.send(JSON.stringify(viewerPayload)); } catch {} }
+        for (const viewer of room.viewers) { try { viewer.send(JSON.stringify(viewerPayload)); } catch { } }
       }
 
       setTimeout(() => {
@@ -318,7 +341,7 @@ export function handleMessage(ws, raw) {
 
     if (!expired) {
       if (ws.id !== pending.allowedPlayerId) {
-        try { ws.send(JSON.stringify({ type: 'toast', message: '❌ No puedes responder. Le toca al jugador en turno.' })); } catch {}
+        try { ws.send(JSON.stringify({ type: 'toast', message: '❌ No puedes responder. Le toca al jugador en turno.' })); } catch { }
         return;
       }
       correct = (answerIndex === pending.answer);
@@ -354,7 +377,7 @@ export function handleMessage(ws, raw) {
   // -------- Salir de la sala --------
   if (type === 'leaveRoom') {
     const room = getRoomByCode(ws.roomCode);
-    if (!room) { try { ws.send(JSON.stringify({ type: 'left' })); } catch {} return; }
+    if (!room) { try { ws.send(JSON.stringify({ type: 'left' })); } catch { } return; }
 
     room.clients.delete(ws);
 
@@ -365,7 +388,7 @@ export function handleMessage(ws, raw) {
 
     ws.roomCode = null;
 
-    try { ws.send(JSON.stringify({ type: 'left' })); } catch {}
+    try { ws.send(JSON.stringify({ type: 'left' })); } catch { }
     broadcast(room, { type: 'roomUpdate', snapshot: makeSnapshot(room) });
 
     if (room.players.size === 0 && room.clients.size === 0 && (!room.viewers || room.viewers.size === 0)) {

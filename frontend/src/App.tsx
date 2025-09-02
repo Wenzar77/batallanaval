@@ -484,6 +484,17 @@ export default function App() {
               </SectionCard>
             )}
 
+            <SectionCard disabledStyling={gameOver} compact>
+              <Typography variant="h6" gutterBottom>
+                Armas del equipo {teamNames[team]}
+              </Typography>
+              <WeaponsPanel
+                weaponCounts={weaponCounts}
+                weaponToUse={weaponToUse}
+                setWeaponToUse={setWeaponToUse}
+              />
+            </SectionCard>
+
             {/* Cuerpo de juego solo si está activo */}
             {isActiveGame && (
               <Grid container spacing={2}>
@@ -558,17 +569,6 @@ export default function App() {
                     </Typography>
                     <Divider sx={{ my: 1.5 }} />
                     <FleetPanel teamNames={teamNames} shipsRemaining={snapshot!.shipsRemaining} />
-                  </SectionCard>
-
-                  <SectionCard disabledStyling={gameOver} compact>
-                    <Typography variant="h6" gutterBottom>
-                      Armas del equipo {teamNames[team]}
-                    </Typography>
-                    <WeaponsPanel
-                      weaponCounts={weaponCounts}
-                      weaponToUse={weaponToUse}
-                      setWeaponToUse={setWeaponToUse}
-                    />
                   </SectionCard>
 
                   <SectionCard compact>

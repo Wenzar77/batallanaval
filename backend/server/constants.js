@@ -2,8 +2,8 @@
 export const PORT = process.env.PORT || 3000;
 export const SIZE = 20;
 export const SHIPS = [5, 4, 3, 3, 2, 2, 2];
-export const TRIVIA_PROB = 0.35;
-export const TRIVIA_TIME = 15_000;
+export const TRIVIA_PROB = 0.60;
+export const TRIVIA_TIME = 20_000;
 export const WEAPONS = ['bomb3x3', 'crossMissile', 'bomb2x2'];
 export const TEAM_NAMES = { A: 'Jaguares', B: 'Guacamayas' };
 export const DIST_DIR = '../dist'; // relativo a server/index.js

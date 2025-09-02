@@ -53,7 +53,7 @@ const TriviaDialog: React.FC<{
         {/* Contador regresivo circular */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <CountdownRing
-            seconds={10}
+            seconds={20}
             size={72}
             strokeWidth={8}
             strokeColor="#ff5252"                 // rojo para urgencia
