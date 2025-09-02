@@ -23,7 +23,8 @@ import { SoundTest } from './components/SoundTest';
 
 type PendingShot = { x: number; y: number; weapon?: string | null; nonce?: string };
 
-const isScreen = typeof window !== 'undefined' && window.location.pathname.endsWith('/screen');
+const isScreen = typeof window !== "undefined" && window.location.pathname.startsWith("/screen");
+
 
 export default function App() {
   // Responsive
