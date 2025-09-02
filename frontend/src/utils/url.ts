@@ -26,9 +26,9 @@ export const ensureTokenInURL = (): string => {
 // utils/url.ts
 export const buildScreenUrl = (roomCode: string): string => {
   const params = new URLSearchParams({
-    screen: "1",           // o "true", lo que prefieras
+    t: crypto.randomUUID(),  // si quieres ese token
+    screen: "1",
     [QS_CODE]: roomCode
   });
   return `${window.location.origin}/?${params.toString()}`;
 };
-
